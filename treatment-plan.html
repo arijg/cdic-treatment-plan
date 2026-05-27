@@ -1247,6 +1247,11 @@ async function sendToGHL(btn) {
   const totalDiscountAmt = tpDiscountAmts.reduce((s, a) => s + a, 0);
   const subtotal   = caseTotal - totalDiscountAmt;
 
+  const rawDiscountDate    = document.getElementById('discountDate').value;
+  const discountExpiration = rawDiscountDate
+    ? new Date(rawDiscountDate + 'T00:00:00').toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
+    : '';
+
   const orig = btn.textContent;
   btn.textContent = 'Sending…';
   btn.disabled = true;
@@ -1262,8 +1267,10 @@ async function sendToGHL(btn) {
         email,
         doctor,
         coordinator,
-        caseTotal:  parseFloat(caseTotal.toFixed(2)),
-        subtotal:   parseFloat(subtotal.toFixed(2)),
+        caseTotal:           parseFloat(caseTotal.toFixed(2)),
+        discountAmount:      parseFloat(totalDiscountAmt.toFixed(2)),
+        subtotal:            parseFloat(subtotal.toFixed(2)),
+        discountExpiration,
       })
     });
     btn.textContent = res.ok ? '✓ Sent' : '✗ Error';
