@@ -569,11 +569,23 @@ input[readonly] { background: #f4f6fa; color: #555; cursor: default; }
     <div class="card">
       <div class="card-title">Patient Information</div>
 
-      <div class="form-row">
+      <div class="form-row cols-2">
         <div class="form-group">
-          <label>Patient Name</label>
-          <input type="text" id="patientName" placeholder="Full name">
+          <label>First Name</label>
+          <input type="text" id="patientFirstName" placeholder="First name">
         </div>
+        <div class="form-group">
+          <label>Last Name</label>
+          <input type="text" id="patientLastName" placeholder="Last name">
+        </div>
+      </div>
+
+      <div class="form-row cols-2">
+        <div class="form-group">
+          <label>Phone Number</label>
+          <input type="tel" id="patientPhone" placeholder="(212) 555-0100">
+        </div>
+        <div></div>
       </div>
 
       <div class="form-row cols-2">
@@ -1188,12 +1200,13 @@ function goStep(n) {
 
 function step1Next() {
   const f = {
-    patientName: document.getElementById('patientName').value.trim(),
-    location:    document.getElementById('location').value,
-    doctor:      document.getElementById('doctor').value,
-    coordinator: document.getElementById('coordinator').value,
+    patientFirstName: document.getElementById('patientFirstName').value.trim(),
+    patientLastName:  document.getElementById('patientLastName').value.trim(),
+    location:         document.getElementById('location').value,
+    doctor:           document.getElementById('doctor').value,
+    coordinator:      document.getElementById('coordinator').value,
   };
-  if (!f.patientName || !f.location || !f.doctor || !f.coordinator) {
+  if (!f.patientFirstName || !f.patientLastName || !f.location || !f.doctor || !f.coordinator) {
     alert('Please fill in all required fields.');
     return;
   }
@@ -1213,7 +1226,7 @@ function toggleOptional(label) {
 
 // ── Render treatment plan ──────────────────────────────────────────────
 function renderTreatmentPlan() {
-  const patientName  = document.getElementById('patientName').value;
+  const patientName  = (document.getElementById('patientFirstName').value + ' ' + document.getElementById('patientLastName').value).trim();
   const location     = document.getElementById('location').value;
   const doctor       = document.getElementById('doctor').value;
   const coordinator  = document.getElementById('coordinator').value;
