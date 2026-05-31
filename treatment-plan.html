@@ -76,6 +76,41 @@ input[type=text], input[type=number], input[type=date], input[type=tel], input[t
 input:focus, select:focus, textarea:focus { border-color: #1d4e99; }
 input[readonly] { background: #f4f6fa; color: #555; cursor: default; }
 
+/* ── Long-text overflow protection ── */
+input[type=text], input[type=tel], input[type=email] {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── DOB segmented input ── */
+.dob-wrap {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 9px 13px;
+  border: 1.5px solid #d1d9e6;
+  border-radius: 7px;
+  background: #fff;
+  transition: border-color .15s;
+  width: 100%;
+  box-sizing: border-box;
+}
+.dob-wrap:focus-within { border-color: #1d4e99; }
+.dob-seg {
+  border: none !important;
+  padding: 0 !important;
+  width: 22px !important;
+  outline: none !important;
+  font-size: 14px !important;
+  font-family: inherit !important;
+  color: #111 !important;
+  background: transparent !important;
+  text-align: center;
+}
+.dob-seg.dob-year { width: 40px !important; }
+.dob-sep { color: #aaa; font-size: 14px; line-height: 1; user-select: none; }
+
 /* ── Buttons ── */
 .btn {
   display: inline-flex;
@@ -594,7 +629,14 @@ input[readonly] { background: #f4f6fa; color: #555; cursor: default; }
         </div>
         <div class="form-group">
           <label>Date of Birth <span style="font-weight:400;color:#888">(PDF password)</span></label>
-          <input type="date" id="patientDOB">
+          <div class="dob-wrap">
+            <input class="dob-seg" id="dobMM"   maxlength="2" placeholder="MM"   inputmode="numeric" autocomplete="off">
+            <span class="dob-sep">/</span>
+            <input class="dob-seg" id="dobDD"   maxlength="2" placeholder="DD"   inputmode="numeric" autocomplete="off">
+            <span class="dob-sep">/</span>
+            <input class="dob-seg dob-year" id="dobYYYY" maxlength="4" placeholder="YYYY" inputmode="numeric" autocomplete="off">
+          </div>
+          <input type="hidden" id="patientDOB">
         </div>
       </div>
 
@@ -1221,8 +1263,49 @@ function step1Next() {
     alert('Please fill in all required fields.');
     return;
   }
+  const rawPhone = document.getElementById('patientPhone').value.replace(/\D/g, '');
+  if (rawPhone && rawPhone.length < 10) {
+    alert('Please enter a valid phone number (at least 10 digits).');
+    document.getElementById('patientPhone').focus();
+    return;
+  }
   goStep(2);
 }
+
+// ── DOB segmented input auto-advance ──────────────────────────────────
+(function() {
+  function syncDOB() {
+    const mm   = document.getElementById('dobMM').value.padStart(2, '0');
+    const dd   = document.getElementById('dobDD').value.padStart(2, '0');
+    const yyyy = document.getElementById('dobYYYY').value;
+    document.getElementById('patientDOB').value =
+      (mm !== '00' && dd !== '00' && yyyy.length === 4) ? `${yyyy}-${mm}-${dd}` : '';
+  }
+  function onlyDigits(e) {
+    e.target.value = e.target.value.replace(/\D/g, '');
+  }
+  document.getElementById('dobMM').addEventListener('input', function() {
+    onlyDigits({ target: this });
+    syncDOB();
+    if (this.value.length === 2) document.getElementById('dobDD').focus();
+  });
+  document.getElementById('dobDD').addEventListener('input', function() {
+    onlyDigits({ target: this });
+    syncDOB();
+    if (this.value.length === 2) document.getElementById('dobYYYY').focus();
+  });
+  document.getElementById('dobYYYY').addEventListener('input', function() {
+    onlyDigits({ target: this });
+    syncDOB();
+  });
+  // Allow backspace to jump back to previous segment
+  document.getElementById('dobDD').addEventListener('keydown', function(e) {
+    if (e.key === 'Backspace' && this.value === '') document.getElementById('dobMM').focus();
+  });
+  document.getElementById('dobYYYY').addEventListener('keydown', function(e) {
+    if (e.key === 'Backspace' && this.value === '') document.getElementById('dobDD').focus();
+  });
+}());
 
 function step2Next() {
   renderTreatmentPlan();
