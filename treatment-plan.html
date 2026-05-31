@@ -552,6 +552,8 @@ input[readonly] { background: #f4f6fa; color: #555; cursor: default; }
   .tp-tbl { min-width: 520px; }
 }
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
 <div class="app">
@@ -581,7 +583,7 @@ input[readonly] { background: #f4f6fa; color: #555; cursor: default; }
         </div>
       </div>
 
-      <div class="form-row cols-2">
+      <div class="form-row cols-3" style="grid-template-columns:1fr 1fr 1fr">
         <div class="form-group">
           <label>Phone Number</label>
           <input type="tel" id="patientPhone" placeholder="(212) 555-0100">
@@ -589,6 +591,10 @@ input[readonly] { background: #f4f6fa; color: #555; cursor: default; }
         <div class="form-group">
           <label>Email</label>
           <input type="email" id="patientEmail" placeholder="email@example.com">
+        </div>
+        <div class="form-group">
+          <label>Date of Birth <span style="font-weight:400;color:#888">(PDF password)</span></label>
+          <input type="date" id="patientDOB">
         </div>
       </div>
 
@@ -739,7 +745,7 @@ input[readonly] { background: #f4f6fa; color: #555; cursor: default; }
   <div class="step" id="step-3">
     <div class="no-print actions" style="margin-bottom:14px">
       <button class="btn btn-secondary" onclick="goStep(2)">← Back</button>
-      <button class="btn btn-ghl"       onclick="sendToGHL(this)">GHL</button>
+      <button class="btn btn-ghl"       onclick="uploadToGHL(this)">⬆ Send to GHL</button>
       <button class="btn btn-print"     onclick="window.print()">🖨 Print</button>
     </div>
     <div class="tp-wrap">
@@ -1229,62 +1235,104 @@ function toggleOptional(label) {
   label.nextElementSibling.classList.toggle('open');
 }
 
-// ── GoHighLevel webhook ────────────────────────────────────────────────
-async function sendToGHL(btn) {
-  const firstName   = document.getElementById('patientFirstName').value.trim();
-  const lastName    = document.getElementById('patientLastName').value.trim();
-  const phone       = document.getElementById('patientPhone').value.trim();
-  const email       = document.getElementById('patientEmail').value.trim();
-  const doctor      = document.getElementById('doctor').value;
-  const coordinator = document.getElementById('coordinator').value;
+// ── Send to GHL via Cloudflare Worker ────────────────────────────────
+const WORKER_URL = 'https://cdic-ghl-upload.ariel-5fb.workers.dev/';
 
-  const upper      = procedures.filter(p => p.section === 'upper');
-  const lower      = procedures.filter(p => p.section === 'lower' || p.section === 'mixed');
-  const upperTotal = upper.reduce((s, p) => s + p.total, 0);
-  const lowerTotal = lower.reduce((s, p) => s + p.total, 0);
-  const caseTotal  = upperTotal + lowerTotal + XRAY_SUBTOTAL;
-  const tpDiscountAmts   = computeDiscountAmounts(caseTotal, discounts);
-  const totalDiscountAmt = tpDiscountAmts.reduce((s, a) => s + a, 0);
-  const subtotal   = caseTotal - totalDiscountAmt;
-
-  const rawDiscountDate    = document.getElementById('discountDate').value;
-  const discountExpiration = rawDiscountDate
-    ? new Date(rawDiscountDate + 'T00:00:00').toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' })
-    : '';
+async function uploadToGHL(btn) {
+  if (WORKER_URL === 'PASTE_YOUR_WORKER_URL_HERE') {
+    alert('Please set up the Cloudflare Worker first and paste the URL into the app.');
+    return;
+  }
 
   const orig = btn.textContent;
-  btn.textContent = 'Sending…';
+  btn.textContent = 'Generating…';
   btn.disabled = true;
 
   try {
-    const res = await fetch('https://services.leadconnectorhq.com/hooks/ux8dDIVrVFv7Hgye423F/webhook-trigger/570411bc-1fe2-4053-9746-98db19b23303', {
+    // Capture the treatment plan as a canvas
+    const element = document.querySelector('.tp-wrap');
+    const canvas  = await html2canvas(element, { scale: 2, useCORS: true, backgroundColor: '#fff' });
+
+    // Build PDF (letter size), encrypted with patient's DOB (MMDDYYYY) if provided
+    const { jsPDF } = window.jspdf;
+    const dobRaw = document.getElementById('patientDOB').value; // "YYYY-MM-DD"
+    const dobPassword = dobRaw
+      ? (() => { const [y, m, d] = dobRaw.split('-'); return m + d + y; })()
+      : '';
+    const pdfOpts = { orientation: 'portrait', unit: 'mm', format: 'letter' };
+    if (dobPassword) {
+      pdfOpts.encryption = {
+        userPassword:    dobPassword,
+        ownerPassword:   dobPassword + 'cdic',
+        userPermissions: ['print'],
+      };
+    }
+    const pdf = new jsPDF(pdfOpts);
+    const pageW    = pdf.internal.pageSize.getWidth();
+    const pageH    = pdf.internal.pageSize.getHeight();
+    const imgH     = (canvas.height * pageW) / canvas.width;
+
+    // Add pages if content is taller than one page
+    let yOffset = 0;
+    while (yOffset < imgH) {
+      if (yOffset > 0) pdf.addPage();
+      pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, -yOffset, pageW, imgH);
+      yOffset += pageH;
+    }
+
+    const pdfBase64 = pdf.output('datauristring').split(',')[1];
+    const firstName = document.getElementById('patientFirstName').value.trim();
+    const lastName  = document.getElementById('patientLastName').value.trim();
+    const dateStamp = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }).replace(/\//g, '-');
+    const fileName  = `Treatment Plan - ${firstName} ${lastName} ${dateStamp}.pdf`;
+
+    // Compute treatment totals
+    const upper            = procedures.filter(p => p.section === 'upper');
+    const lower            = procedures.filter(p => p.section === 'lower' || p.section === 'mixed');
+    const caseTotal        = upper.reduce((s, p) => s + p.total, 0) + lower.reduce((s, p) => s + p.total, 0) + XRAY_SUBTOTAL;
+    const tpDiscountAmts   = computeDiscountAmounts(caseTotal, discounts);
+    const totalDiscountAmt = tpDiscountAmts.reduce((s, a) => s + a, 0);
+
+    btn.textContent = 'Uploading…';
+
+    const res = await fetch(WORKER_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
+        pdfBase64,
+        fileName,
         firstName,
         lastName,
-        phone,
-        email,
-        doctor,
-        coordinator,
-        caseTotal:           parseFloat(caseTotal.toFixed(2)),
-        discountAmount:      parseFloat(totalDiscountAmt.toFixed(2)),
-        subtotal:            parseFloat(subtotal.toFixed(2)),
-        discountExpiration,
-      })
+        email:              document.getElementById('patientEmail').value.trim(),
+        phone:              document.getElementById('patientPhone').value.trim(),
+        dateOfBirth:        document.getElementById('patientDOB').value,
+        doctor:             document.getElementById('doctor').value,
+        coordinator:        document.getElementById('coordinator').value,
+        caseTotal:          parseFloat(caseTotal.toFixed(2)),
+        discountAmount:     parseFloat(totalDiscountAmt.toFixed(2)),
+        discountExpiration: document.getElementById('discountDate').value,
+        today:              new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
+      }),
     });
-    btn.textContent = res.ok ? '✓ Sent' : '✗ Error';
-    btn.style.background = res.ok ? '#1a7a4a' : '#c0392b';
-  } catch (e) {
-    btn.textContent = '✗ Error';
-    btn.style.background = '#c0392b';
-  }
 
-  setTimeout(() => {
-    btn.textContent = orig;
-    btn.style.background = '';
-    btn.disabled = false;
-  }, 3000);
+    const result = await res.json();
+    if (!result.success) {
+      btn.textContent    = '✗ Error';
+      btn.style.background = '#c0392b';
+      setTimeout(() => { btn.textContent = orig; btn.style.background = ''; btn.disabled = false; }, 4000);
+      return;
+    }
+
+    btn.textContent    = '✓ Done';
+    btn.style.background = '#1a7a4a';
+    setTimeout(() => { btn.textContent = orig; btn.style.background = ''; btn.disabled = false; }, 3000);
+
+  } catch (e) {
+    console.error(e);
+    btn.textContent    = '✗ Error';
+    btn.style.background = '#c0392b';
+    setTimeout(() => { btn.textContent = orig; btn.style.background = ''; btn.disabled = false; }, 4000);
+  }
 }
 
 // ── Render treatment plan ──────────────────────────────────────────────
