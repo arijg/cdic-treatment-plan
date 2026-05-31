@@ -1307,6 +1307,20 @@ function step1Next() {
   });
 }());
 
+// ── Phone number auto-format (XXX) XXX-XXXX ──────────────────────────
+document.getElementById('patientPhone').addEventListener('input', function() {
+  const digits = this.value.replace(/\D/g, '').slice(0, 10);
+  let formatted = digits;
+  if (digits.length >= 7) {
+    formatted = `(${digits.slice(0,3)}) ${digits.slice(3,6)}-${digits.slice(6)}`;
+  } else if (digits.length >= 4) {
+    formatted = `(${digits.slice(0,3)}) ${digits.slice(3)}`;
+  } else if (digits.length >= 1) {
+    formatted = `(${digits}`;
+  }
+  this.value = formatted;
+});
+
 function step2Next() {
   renderTreatmentPlan();
   goStep(3);
