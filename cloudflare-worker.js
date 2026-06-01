@@ -1,11 +1,13 @@
 // CDIC Treatment Plan — Cloudflare Worker
-// 1. Uploads PDF to GHL media library
-// 2. Upserts contact (name, email, phone, DOB)
-// 3. Creates or updates opportunity in the "Treatment Plan Given" pipeline, "First Visit" stage
+// 1. Verifies app access via PIN
+// 2. Uploads PDF to GHL media library
+// 3. Upserts contact (name, email, phone, DOB)
+// 4. Creates or updates opportunity in the "Treatment Plan Given" pipeline, "First Visit" stage
 //
 // Secrets (Workers → Settings → Variables → Secrets):
 //   GHL_API_KEY      — GHL Location API key
 //   GHL_LOCATION_ID  — GHL Location ID
+//   APP_PIN          — 4-digit PIN to access the app (optional — if not set, PIN is disabled)
 //
 // Required API key scopes:
 //   contacts.write · contacts.notes.write · medias.write · opportunities.write
@@ -16,6 +18,28 @@ export default {
     if (request.method === 'OPTIONS') return cors(null, 204);
     if (request.method !== 'POST')    return cors(JSON.stringify({ error: 'Method not allowed' }), 405);
 
+    // ── Route: PIN verification ───────────────────────────────────────
+    const url = new URL(request.url);
+    if (url.pathname === '/verify-pin') {
+      // If no APP_PIN secret is configured, access is open
+      if (!env.APP_PIN) {
+        return cors(JSON.stringify({ success: true, token: 'open' }), 200);
+      }
+      try {
+        const { pin } = await request.json();
+        if (String(pin) === String(env.APP_PIN)) {
+          // Generate a simple session token (random hex, valid this session only)
+          const token = [...crypto.getRandomValues(new Uint8Array(16))]
+            .map(b => b.toString(16).padStart(2, '0')).join('');
+          return cors(JSON.stringify({ success: true, token }), 200);
+        }
+        return cors(JSON.stringify({ success: false, error: 'Incorrect PIN' }), 401);
+      } catch (e) {
+        return cors(JSON.stringify({ error: e.message }), 400);
+      }
+    }
+
+    // ── Route: GHL upload (default) ───────────────────────────────────
     try {
       const {
         pdfBase64, fileName,
@@ -103,7 +127,7 @@ export default {
         addCF('treatment_plant_link',    fileUrl);
         addCF('treating_doctor',         doctor);
         addCF('treatment_coordinator',   coordinator);
-        addCF('discount_amount',         discountAmount);
+        addCF('discount_amount',         Number(discountAmount).toLocaleString('en-US'));
         addCF('discount_expiration',     discountExpiration);
 
         const oppBody = {

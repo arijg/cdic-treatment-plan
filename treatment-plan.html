@@ -670,11 +670,135 @@ input[type=text], input[type=tel], input[type=email] {
 .ghl-step.active  { opacity: 1; font-weight: 700; }
 .ghl-step.done    { opacity: .6; }
 .ghl-sep { opacity: .35; }
+
+/* ── PIN lock screen ── */
+.pin-overlay {
+  position: fixed;
+  inset: 0;
+  background: #eef1f6;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.pin-overlay.hidden { display: none; }
+.pin-card {
+  background: #fff;
+  border-radius: 16px;
+  padding: 40px 36px 32px;
+  max-width: 340px;
+  width: 100%;
+  box-shadow: 0 4px 24px rgba(0,0,0,.12);
+  text-align: center;
+}
+.pin-logo {
+  width: 60px;
+  margin: 0 auto 18px;
+  display: block;
+  opacity: .85;
+}
+.pin-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #111;
+  margin-bottom: 6px;
+}
+.pin-subtitle {
+  font-size: 13px;
+  color: #777;
+  margin-bottom: 24px;
+}
+.pin-dots {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  margin-bottom: 24px;
+}
+.pin-dot {
+  width: 14px; height: 14px;
+  border-radius: 50%;
+  border: 2px solid #c8d0dc;
+  background: transparent;
+  transition: background .15s, border-color .15s;
+}
+.pin-dot.filled { background: #1d4e99; border-color: #1d4e99; }
+.pin-dot.error  { background: #dc3545; border-color: #dc3545; }
+.pin-keypad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  max-width: 240px;
+  margin: 0 auto;
+}
+.pin-key {
+  aspect-ratio: 1.4;
+  border: 1.5px solid #d1d9e6;
+  border-radius: 10px;
+  background: #fff;
+  font-size: 22px;
+  font-weight: 600;
+  color: #222;
+  cursor: pointer;
+  transition: background .1s, border-color .1s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+.pin-key:active { background: #e8edf5; }
+.pin-key.empty  { border: none; cursor: default; }
+.pin-key.back   { font-size: 18px; color: #888; }
+.pin-error-msg {
+  font-size: 13px;
+  color: #dc3545;
+  font-weight: 600;
+  margin-top: 14px;
+  min-height: 20px;
+}
+@keyframes pin-shake {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-8px); }
+  40%, 80% { transform: translateX(8px); }
+}
+.pin-dots.shake { animation: pin-shake .4s ease; }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
+
+<!-- ── PIN Lock Screen ── -->
+<div class="pin-overlay" id="pinOverlay">
+  <div class="pin-card">
+    <img class="pin-logo" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%231d4e99'%3E%3Cpath d='M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zM12 17c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1s3.1 1.39 3.1 3.1v2z'/%3E%3C/svg%3E" alt="">
+    <div class="pin-title">CDIC Treatment Plan</div>
+    <div class="pin-subtitle">Enter PIN to continue</div>
+    <div class="pin-dots" id="pinDots">
+      <div class="pin-dot" id="dot0"></div>
+      <div class="pin-dot" id="dot1"></div>
+      <div class="pin-dot" id="dot2"></div>
+      <div class="pin-dot" id="dot3"></div>
+    </div>
+    <div class="pin-keypad" id="pinKeypad">
+      <button class="pin-key" onclick="pinPress('1')">1</button>
+      <button class="pin-key" onclick="pinPress('2')">2</button>
+      <button class="pin-key" onclick="pinPress('3')">3</button>
+      <button class="pin-key" onclick="pinPress('4')">4</button>
+      <button class="pin-key" onclick="pinPress('5')">5</button>
+      <button class="pin-key" onclick="pinPress('6')">6</button>
+      <button class="pin-key" onclick="pinPress('7')">7</button>
+      <button class="pin-key" onclick="pinPress('8')">8</button>
+      <button class="pin-key" onclick="pinPress('9')">9</button>
+      <button class="pin-key empty"></button>
+      <button class="pin-key" onclick="pinPress('0')">0</button>
+      <button class="pin-key back" onclick="pinBack()">&larr;</button>
+    </div>
+    <div class="pin-error-msg" id="pinError"></div>
+  </div>
+</div>
+
 <div class="app">
 
   <!-- Step indicator -->
@@ -1777,6 +1901,93 @@ function renderTreatmentPlan() {
   const dateStamp = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }).replace(/\//g, '-');
   document.title = `Treatment Plan - ${patientName} ${dateStamp}`;
 }
+
+// ══════════════════════════════════════════════════════════════════════
+// PIN LOCK SCREEN
+// ══════════════════════════════════════════════════════════════════════
+(function() {
+  const PIN_LENGTH = 4;
+  let pinDigits = [];
+  let pinLocked = false;
+
+  // If we already have a session token, skip the PIN screen
+  if (sessionStorage.getItem('cdic_pin_token')) {
+    document.getElementById('pinOverlay').classList.add('hidden');
+  }
+
+  function updateDots() {
+    for (let i = 0; i < PIN_LENGTH; i++) {
+      const dot = document.getElementById('dot' + i);
+      dot.classList.toggle('filled', i < pinDigits.length);
+      dot.classList.remove('error');
+    }
+    document.getElementById('pinError').textContent = '';
+  }
+
+  window.pinPress = function(digit) {
+    if (pinLocked || pinDigits.length >= PIN_LENGTH) return;
+    pinDigits.push(digit);
+    updateDots();
+
+    if (pinDigits.length === PIN_LENGTH) {
+      pinLocked = true;
+      verifyPin(pinDigits.join(''));
+    }
+  };
+
+  window.pinBack = function() {
+    if (pinLocked) return;
+    pinDigits.pop();
+    updateDots();
+  };
+
+  // Also support physical keyboard
+  document.addEventListener('keydown', function(e) {
+    const overlay = document.getElementById('pinOverlay');
+    if (overlay.classList.contains('hidden')) return;
+    if (e.key >= '0' && e.key <= '9') { pinPress(e.key); }
+    else if (e.key === 'Backspace') { e.preventDefault(); pinBack(); }
+  });
+
+  async function verifyPin(pin) {
+    try {
+      const res = await fetch(WORKER_URL + 'verify-pin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin }),
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        sessionStorage.setItem('cdic_pin_token', data.token);
+        document.getElementById('pinOverlay').classList.add('hidden');
+      } else {
+        showPinError();
+      }
+    } catch (e) {
+      showPinError('Connection error');
+    }
+  }
+
+  function showPinError(msg) {
+    const dots = document.getElementById('pinDots');
+    const errEl = document.getElementById('pinError');
+
+    // Flash dots red + shake
+    for (let i = 0; i < PIN_LENGTH; i++) {
+      document.getElementById('dot' + i).classList.add('error');
+    }
+    dots.classList.add('shake');
+    errEl.textContent = msg || 'Incorrect PIN';
+
+    setTimeout(() => {
+      pinDigits = [];
+      pinLocked = false;
+      dots.classList.remove('shake');
+      updateDots();
+    }, 600);
+  }
+})();
 </script>
 </body>
 </html>
