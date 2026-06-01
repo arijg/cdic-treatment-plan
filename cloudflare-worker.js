@@ -20,7 +20,8 @@ export default {
       const {
         pdfBase64, fileName,
         firstName, lastName, email, phone, dateOfBirth,
-        doctor, coordinator, caseTotal, discountAmount, discountExpiration, today: clientToday,
+        doctor, coordinator, caseTotal, discountAmount, discountExpiration,
+        ceramicTreatmentPlan, today: clientToday,
       } = await request.json();
 
       const HEADERS = {
@@ -105,6 +106,7 @@ export default {
         addCF('treatment_coordinator',   coordinator);
         addCF('discount_amount',         discountAmount);
         addCF('discount_expiration',     discountExpiration);
+        addCF('ceramic_treatment_plan',  ceramicTreatmentPlan ? 1 : 0); // 1 if ceramic implant on plan, else 0
 
         const oppBody = {
           pipelineId,

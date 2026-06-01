@@ -1476,6 +1476,12 @@ const IMPLANT_NAMES = new Set([
   'zirconia/ceramic implant post & crown',
 ]);
 
+// Ceramic-implant treatments that flag the opportunity as a ceramic treatment plan
+const CERAMIC_NAMES = new Set([
+  'zirconia / metal free / ceramic implant',
+  'zirconia/ceramic implant post & crown',
+]);
+
 function step2Next() {
   // Count total implant units across trigger procedures
   const implantUnits = procedures.reduce((sum, p) => {
@@ -1579,6 +1585,11 @@ async function uploadToGHL(btn) {
     const tpDiscountAmts   = computeDiscountAmounts(caseTotal, discounts);
     const totalDiscountAmt = tpDiscountAmts.reduce((s, a) => s + a, 0);
 
+    // Ceramic treatment plan flag: 1 if any ceramic implant procedure is present, else 0
+    const ceramicTreatmentPlan = procedures.some(
+      p => CERAMIC_NAMES.has(p.name.toLowerCase().trim())
+    ) ? 1 : 0;
+
     btn.innerHTML = spinnerHTML('upload');
 
     const res = await fetch(WORKER_URL, {
@@ -1597,6 +1608,7 @@ async function uploadToGHL(btn) {
         caseTotal:          parseFloat(caseTotal.toFixed(2)),
         discountAmount:     parseFloat(totalDiscountAmt.toFixed(2)),
         discountExpiration: document.getElementById('discountDate').value,
+        ceramicTreatmentPlan,
         today:              new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
       }),
     });
