@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>CDIC Treatment Plan</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -745,6 +745,7 @@ input[type=text], input[type=tel], input[type=email] {
   align-items: center;
   justify-content: center;
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
   user-select: none;
 }
 .pin-key:active { background: #e8edf5; }
@@ -1961,6 +1962,8 @@ function renderTreatmentPlan() {
       if (data.success) {
         sessionStorage.setItem('cdic_pin_token', data.token);
         document.getElementById('pinOverlay').classList.add('hidden');
+        // Reset viewport in case iOS Safari zoomed during PIN entry
+        window.scrollTo(0, 0);
       } else {
         showPinError();
       }
