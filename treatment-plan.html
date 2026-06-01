@@ -570,7 +570,20 @@ input[type=text], input[type=tel], input[type=email] {
 }
 
 @media screen and (max-width: 600px) {
-  /* Step 2: stack procedure input fields vertically */
+  /* App padding */
+  .app { padding: 12px 10px 32px; }
+
+  /* Card padding */
+  .card { padding: 20px 16px; }
+
+  /* Step pills — prevent text wrapping */
+  .step-pill {
+    font-size: 11px;
+    padding: 10px 4px;
+    white-space: nowrap;
+  }
+
+  /* Step 1 & 2: stack form rows vertically */
   .form-row.cols-3,
   .form-row.cols-2,
   .discount-input-row {
@@ -581,10 +594,29 @@ input[type=text], input[type=tel], input[type=email] {
     justify-content: center;
   }
 
-  /* Step 3: make table scroll horizontally on screen only (print unaffected) */
-  .tp { padding: 0 16px 24px; }
+  /* Step 2: simplify procedure list for mobile */
+  .proc-list-header { display: none; }
+  .proc-item {
+    grid-template-columns: 1fr 30px 80px auto auto !important;
+    gap: 6px;
+  }
+  .drag-handle { display: none; }
+  .proc-teeth  { display: none; }
+  .price-input { width: 80px; }
+
+  /* Step 3: table scrolls horizontally */
+  .tp { padding: 0 12px 20px; }
   .tp-wrap { overflow-x: auto; }
   .tp-tbl { min-width: 520px; }
+
+  /* Step 3: stack fine-print + summary vertically */
+  .tp-bottom {
+    flex-direction: column;
+    gap: 14px;
+  }
+  .tp-fine-print { max-width: 100%; }
+  .tp-summary { justify-content: flex-start; }
+  .tp-summary-inner { min-width: unset; width: 100%; }
 }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
@@ -1225,7 +1257,7 @@ function renderProcList() {
              ondragend="onDragEnd(event)">
           <span class="drag-handle">⠿</span>
           <span>${p.name}<span class="badge ${sCls[p.section]}">${sLabel[p.section]}</span></span>
-          <span>${p.teeth}</span>
+          <span class="proc-teeth">${p.teeth}</span>
           <span>${p.units}</span>
           <input class="price-input" type="number" value="${p.price}" min="0" step="5"
                  onchange="updateProcPrice(${i}, this.value)"
