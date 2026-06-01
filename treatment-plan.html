@@ -618,6 +618,31 @@ input[type=text], input[type=tel], input[type=email] {
   .tp-summary { justify-content: flex-start; }
   .tp-summary-inner { min-width: unset; width: 100%; }
 }
+
+/* ── Warning modal ── */
+.modal-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.45);
+  z-index: 1000;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.modal-overlay.open { display: flex; }
+.modal-box {
+  background: #fff;
+  border-radius: 12px;
+  padding: 28px 28px 22px;
+  max-width: 420px;
+  width: 100%;
+  box-shadow: 0 8px 32px rgba(0,0,0,.18);
+}
+.modal-icon { font-size: 28px; margin-bottom: 10px; }
+.modal-title { font-size: 16px; font-weight: 700; color: #111; margin-bottom: 10px; }
+.modal-body  { font-size: 14px; color: #444; line-height: 1.6; margin-bottom: 22px; }
+.modal-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -828,6 +853,22 @@ input[type=text], input[type=tel], input[type=email] {
   </div>
 
 </div><!-- /app -->
+
+<!-- ── Surgical Temporary warning modal ── -->
+<div class="modal-overlay no-print" id="surgTempModal">
+  <div class="modal-box">
+    <div class="modal-icon">⚠️</div>
+    <div class="modal-title">Missing Surgical Temporary Per Unit?</div>
+    <div class="modal-body">
+      This plan includes <strong id="surgTempImplantCount"></strong> implant unit(s) but no
+      <strong>Surgical Temporary Per Unit</strong>. Did you mean to add one?
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeSurgTempModal()">← Go Back &amp; Add</button>
+      <button class="btn btn-primary"   onclick="confirmSurgTempModal()">Continue Anyway</button>
+    </div>
+  </div>
+</div>
 
 
 <script>
@@ -1353,7 +1394,41 @@ document.getElementById('patientPhone').addEventListener('input', function() {
   this.value = formatted;
 });
 
+// ── Surgical Temporary check ─────────────────────────────────────────
+const IMPLANT_NAMES = new Set([
+  'titanium implant abutment',
+  'titanium implant abutment & crown',
+  'zirconia / metal free / ceramic implant',
+  'zirconia/ceramic implant post & crown',
+]);
+
 function step2Next() {
+  // Count total implant units across trigger procedures
+  const implantUnits = procedures.reduce((sum, p) => {
+    return IMPLANT_NAMES.has(p.name.toLowerCase().trim()) ? sum + (p.units || 1) : sum;
+  }, 0);
+
+  const hasSurgTemp = procedures.some(
+    p => p.name.toLowerCase().trim() === 'surgical temporary per unit'
+  );
+
+  if (implantUnits >= 4 && !hasSurgTemp) {
+    document.getElementById('surgTempImplantCount').textContent = implantUnits;
+    document.getElementById('surgTempModal').classList.add('open');
+    return; // wait for modal response
+  }
+
+  renderTreatmentPlan();
+  goStep(3);
+}
+
+function closeSurgTempModal() {
+  document.getElementById('surgTempModal').classList.remove('open');
+  // stays on step 2
+}
+
+function confirmSurgTempModal() {
+  document.getElementById('surgTempModal').classList.remove('open');
   renderTreatmentPlan();
   goStep(3);
 }
