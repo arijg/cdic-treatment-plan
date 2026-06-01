@@ -379,6 +379,12 @@ input[type=text], input[type=tel], input[type=email] {
 }
 .btn-clear-teeth:hover { background: #fff0f0; }
 
+/* Desktop: lower teeth display 32→17 (mirrors upper arch anatomically) */
+@media screen and (min-width: 601px) {
+  #lowerTeethGrid { direction: rtl; }
+  #lowerTeethGrid .tooth-btn { direction: ltr; }
+}
+
 @media screen and (max-width: 600px) {
   .tooth-grid { grid-template-columns: repeat(8, 1fr); gap: 2px; width: 100%; }
   .tooth-arch-row { flex-direction: column; align-items: stretch; gap: 3px; }
@@ -931,7 +937,7 @@ function buildToothGrids() {
   upper.innerHTML = Array.from({length:16}, (_,i) => i+1).map(n =>
     `<button type="button" class="tooth-btn" data-tooth="${n}" onclick="toggleTooth(${n})">${n}</button>`
   ).join('');
-  lower.innerHTML = Array.from({length:16}, (_,i) => 32-i).map(n =>
+  lower.innerHTML = Array.from({length:16}, (_,i) => 17+i).map(n =>
     `<button type="button" class="tooth-btn" data-tooth="${n}" onclick="toggleTooth(${n})">${n}</button>`
   ).join('');
 }
