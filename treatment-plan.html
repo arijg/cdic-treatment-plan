@@ -643,6 +643,33 @@ input[type=text], input[type=tel], input[type=email] {
 .modal-title { font-size: 16px; font-weight: 700; color: #111; margin-bottom: 10px; }
 .modal-body  { font-size: 14px; color: #444; line-height: 1.6; margin-bottom: 22px; }
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+
+/* ── GHL upload spinner ── */
+@keyframes btn-spin { to { transform: rotate(360deg); } }
+.btn-spinner {
+  display: inline-block;
+  width: 13px; height: 13px;
+  border: 2px solid rgba(255,255,255,.35);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: btn-spin .65s linear infinite;
+  vertical-align: middle;
+  margin-right: 6px;
+  flex-shrink: 0;
+}
+.ghl-progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.ghl-step {
+  opacity: .45;
+  transition: opacity .2s;
+}
+.ghl-step.active  { opacity: 1; font-weight: 700; }
+.ghl-step.done    { opacity: .6; }
+.ghl-sep { opacity: .35; }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -870,6 +897,19 @@ input[type=text], input[type=tel], input[type=email] {
   </div>
 </div>
 
+<!-- ── Duplicate procedure warning modal ── -->
+<div class="modal-overlay no-print" id="dupeModal">
+  <div class="modal-box">
+    <div class="modal-icon">⚠️</div>
+    <div class="modal-title">Duplicate Procedure</div>
+    <div class="modal-body" id="dupeModalBody"></div>
+    <div class="modal-actions">
+      <button class="btn btn-secondary" onclick="closeDupeModal()">Cancel</button>
+      <button class="btn btn-primary"   onclick="confirmDupeModal()">Add Anyway</button>
+    </div>
+  </div>
+</div>
+
 
 <script>
 // ── Set discount date default to end of current month ────────────────
@@ -1069,7 +1109,9 @@ function updateCalc() {
 }
 
 // ── Add procedure ──────────────────────────────────────────────────────
-function addProcedure() {
+let _pendingProc = null; // held while duplicate modal is open
+
+function addProcedure(skipDupeCheck) {
   const name  = document.getElementById('txInput').value.trim();
   const price = parseFloat(document.getElementById('priceInput').value);
   const teeth = document.getElementById('teethInput').value.trim();
@@ -1083,6 +1125,27 @@ function addProcedure() {
   const section = getSection(teeth);
   const units   = nums.length;
 
+  // ── Duplicate check ──────────────────────────────────────────────────
+  if (!skipDupeCheck) {
+    const newSet = new Set(nums);
+    const dupe = procedures.find(p => {
+      if (p.name.toLowerCase().trim() !== name.toLowerCase().trim()) return false;
+      const existSet = new Set(parseTeeth(p.teeth));
+      return [...newSet].some(n => existSet.has(n));
+    });
+    if (dupe) {
+      const overlap = parseTeeth(dupe.teeth).filter(n => newSet.has(n));
+      document.getElementById('dupeModalBody').innerHTML =
+        `<strong>${name}</strong> is already in the plan for ` +
+        `tooth${overlap.length > 1 ? 's' : ''} <strong>${overlap.join(', ')}</strong>. ` +
+        `Are you sure you want to add it again?`;
+      _pendingProc = { name, price, teeth, nums, section, units };
+      document.getElementById('dupeModal').classList.add('open');
+      return;
+    }
+  }
+
+  // ── Push to procedures ───────────────────────────────────────────────
   if (section === 'mixed') {
     const upperTeeth = nums.filter(n => n >= 1  && n <= 16);
     const lowerTeeth = nums.filter(n => n >= 17 && n <= 36);
@@ -1102,6 +1165,17 @@ function addProcedure() {
 
   renderProcList();
   renderSubtotal();
+}
+
+function closeDupeModal() {
+  _pendingProc = null;
+  document.getElementById('dupeModal').classList.remove('open');
+}
+
+function confirmDupeModal() {
+  document.getElementById('dupeModal').classList.remove('open');
+  if (_pendingProc) { addProcedure(true); } // skip check this time
+  _pendingProc = null;
 }
 
 // ── Discount autocomplete ─────────────────────────────────────────────
@@ -1448,8 +1522,16 @@ async function uploadToGHL(btn) {
     return;
   }
 
-  const orig = btn.textContent;
-  btn.textContent = 'Generating…';
+  const orig = btn.innerHTML;
+  const spinnerHTML = (step) => `<span class="ghl-progress">` +
+    `<span class="btn-spinner"></span>` +
+    `<span class="ghl-step ${step==='pdf'?'active':'done'}">PDF</span>` +
+    `<span class="ghl-sep">›</span>` +
+    `<span class="ghl-step ${step==='upload'?'active':step==='done'?'done':''}">Upload</span>` +
+    `<span class="ghl-sep">›</span>` +
+    `<span class="ghl-step ${step==='done'?'active':''}">GHL</span>` +
+    `</span>`;
+  btn.innerHTML = spinnerHTML('pdf');
   btn.disabled = true;
 
   try {
@@ -1497,7 +1579,7 @@ async function uploadToGHL(btn) {
     const tpDiscountAmts   = computeDiscountAmounts(caseTotal, discounts);
     const totalDiscountAmt = tpDiscountAmts.reduce((s, a) => s + a, 0);
 
-    btn.textContent = 'Uploading…';
+    btn.innerHTML = spinnerHTML('upload');
 
     const res = await fetch(WORKER_URL, {
       method: 'POST',
@@ -1521,21 +1603,21 @@ async function uploadToGHL(btn) {
 
     const result = await res.json();
     if (!result.success) {
-      btn.textContent    = '✗ Error';
+      btn.innerHTML      = '✗ Error';
       btn.style.background = '#c0392b';
-      setTimeout(() => { btn.textContent = orig; btn.style.background = ''; btn.disabled = false; }, 4000);
+      setTimeout(() => { btn.innerHTML = orig; btn.style.background = ''; btn.disabled = false; }, 4000);
       return;
     }
 
-    btn.textContent    = '✓ Done';
+    btn.innerHTML      = '✓ Sent to GHL';
     btn.style.background = '#1a7a4a';
-    setTimeout(() => { btn.textContent = orig; btn.style.background = ''; btn.disabled = false; }, 3000);
+    setTimeout(() => { btn.innerHTML = orig; btn.style.background = ''; btn.disabled = false; }, 3000);
 
   } catch (e) {
     console.error(e);
-    btn.textContent    = '✗ Error';
+    btn.innerHTML      = '✗ Error';
     btn.style.background = '#c0392b';
-    setTimeout(() => { btn.textContent = orig; btn.style.background = ''; btn.disabled = false; }, 4000);
+    setTimeout(() => { btn.innerHTML = orig; btn.style.background = ''; btn.disabled = false; }, 4000);
   }
 }
 
