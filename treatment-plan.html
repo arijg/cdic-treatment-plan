@@ -268,6 +268,25 @@ input[type=text], input[type=tel], input[type=email] {
 .badge-lower { background: #fef3c7; color: #92400e; }
 .badge-mixed { background: #d1fae5; color: #065f46; }
 
+/* ── Procedure row actions + inline teeth editor ── */
+.proc-teeth.editable { cursor: pointer; text-decoration: underline dotted #b8c2d4; text-underline-offset: 2px; }
+.proc-teeth.editable:hover { color: #1d4e99; }
+.proc-actions { display: flex; gap: 6px; align-items: center; justify-content: flex-end; }
+.btn-edit {
+  background: none; border: none; cursor: pointer;
+  font-size: 14px; line-height: 1; padding: 5px 7px; border-radius: 5px;
+  -webkit-tap-highlight-color: transparent;
+}
+.btn-edit:hover { background: #eef4ff; }
+.proc-edit-panel {
+  background: #f7f9fc; border: 1.5px solid #1d4e99; border-radius: 8px;
+  padding: 14px 16px; margin: -2px 0 9px;
+}
+.proc-edit-title { font-size: 12px; font-weight: 700; color: #1d4e99; text-transform: uppercase; letter-spacing: .5px; margin-bottom: 10px; }
+.proc-edit-sel { font-size: 12px; color: #555; margin-top: 8px; }
+.proc-edit-sel.has-teeth { color: #1d4e99; font-weight: 600; }
+.proc-edit-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 12px; }
+
 .empty-msg {
   text-align: center;
   padding: 28px;
@@ -390,7 +409,7 @@ input[type=text], input[type=tel], input[type=email] {
 .discount-input-row { display: grid; grid-template-columns: 2fr 1fr auto; gap: 12px; align-items: flex-end; margin-bottom: 12px; }
 .discount-item {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr auto;
+  grid-template-columns: 20px 2fr 1fr 1fr auto;
   gap: 8px;
   align-items: center;
   padding: 9px 14px;
@@ -399,10 +418,13 @@ input[type=text], input[type=tel], input[type=email] {
   border-radius: 8px;
   margin-bottom: 7px;
   font-size: 13.5px;
+  transition: opacity .15s, box-shadow .15s;
 }
+.discount-item.dragging  { opacity: .4; }
+.discount-item.drag-over  { box-shadow: 0 0 0 2px #1d4e99; background: #eef4ff; }
 .discount-item-header {
   display: grid;
-  grid-template-columns: 2fr 1fr 1fr auto;
+  grid-template-columns: 20px 2fr 1fr 1fr auto;
   gap: 8px;
   padding: 4px 14px 6px;
   font-size: 11px;
@@ -947,7 +969,8 @@ const TREATMENTS = [
 
 // ── Discount presets ──────────────────────────────────────────────────
 const DISCOUNT_PRESETS = [
-  "$18,900 Special",
+  "Upper Arch $18,900 Special",
+  "Lower Arch $18,900 Special",
   "Senior Citizen Discount",
   "Military Appreciation Discount",
   "Spring Renewal Special",
@@ -955,21 +978,34 @@ const DISCOUNT_PRESETS = [
   "The Fall Confidence Special",
   "New Year, New Smile",
 ];
-const FIXED_PRICE_PRESETS = { "$18,900 Special": 18900 };
+// Fixed-price presets → target price + which arch the special applies to.
+const FIXED_PRICE_PRESETS = {
+  "Upper Arch $18,900 Special": { fixedPrice: 18900, arch: 'upper' },
+  "Lower Arch $18,900 Special": { fixedPrice: 18900, arch: 'lower' },
+};
 const XRAY_SUBTOTAL = 250;
 
-// Returns an array of dollar amounts, one per discount, respecting order:
-// pct discounts apply to `total`; fixed-price discounts apply to what remains after prior discounts.
-function computeDiscountAmounts(total, discountList) {
+// Returns an array of dollar amounts, one per discount, respecting order.
+// ctx may be a plain number (legacy: whole-case total) or an object
+// { total, upperTotal, lowerTotal, xray } so arch-scoped specials can be computed.
+//   • percentage discounts apply to `total`
+//   • arch fixed-price specials bring (that arch's procedures + X-ray) down to fixedPrice
+//   • legacy whole-case fixed-price (no arch) brings the after-percent total down to fixedPrice
+function computeDiscountAmounts(ctx, discountList) {
+  if (typeof ctx === 'number') ctx = { total: ctx, upperTotal: 0, lowerTotal: 0, xray: 0 };
+  const { total, upperTotal = 0, lowerTotal = 0, xray = XRAY_SUBTOTAL } = ctx;
+
   const pctTotal = discountList
     .filter(d => d.fixedPrice === undefined)
     .reduce((s, d) => s + total * (d.pct / 100), 0);
   const afterPct = total - pctTotal;
-  return discountList.map(d =>
-    d.fixedPrice !== undefined
-      ? Math.max(0, afterPct - d.fixedPrice)
-      : total * (d.pct / 100)
-  );
+
+  return discountList.map(d => {
+    if (d.fixedPrice === undefined) return total * (d.pct / 100); // percentage
+    if (d.arch === 'upper')        return Math.max(0, (upperTotal + xray) - d.fixedPrice);
+    if (d.arch === 'lower')        return Math.max(0, (lowerTotal + xray) - d.fixedPrice);
+    return Math.max(0, afterPct - d.fixedPrice); // legacy whole-case
+  });
 }
 
 // ── State ──────────────────────────────────────────────────────────────
@@ -1214,7 +1250,8 @@ function addDiscount() {
   const pctEl = document.getElementById('discountPct');
   if (!name) { alert('Please enter a discount name.'); return; }
   if (FIXED_PRICE_PRESETS[name] !== undefined) {
-    discounts.push({ name, fixedPrice: FIXED_PRICE_PRESETS[name] });
+    const preset = FIXED_PRICE_PRESETS[name];
+    discounts.push({ name, fixedPrice: preset.fixedPrice, arch: preset.arch });
   } else {
     const pct = parseFloat(pctEl.value);
     if (!pct || pct <= 0) { alert('Please enter a valid discount percentage.'); return; }
@@ -1239,21 +1276,56 @@ function renderDiscountList() {
   if (!discounts.length) { wrap.innerHTML = ''; return; }
   const upper = procedures.filter(p => p.section === 'upper');
   const lower = procedures.filter(p => p.section === 'lower' || p.section === 'mixed');
-  const caseTotal = upper.reduce((s,p) => s+p.total, 0) + lower.reduce((s,p) => s+p.total, 0);
+  const upperTotal = upper.reduce((s,p) => s+p.total, 0);
+  const lowerTotal = lower.reduce((s,p) => s+p.total, 0);
+  const caseTotal = upperTotal + lowerTotal;
+  const discCtx = { total: caseTotal + XRAY_SUBTOTAL, upperTotal, lowerTotal, xray: XRAY_SUBTOTAL };
   wrap.innerHTML = `
     <div class="discount-item-header">
-      <span>Name</span><span>%</span><span>Amount</span><span></span>
+      <span></span><span>Name</span><span>%</span><span>Amount</span><span></span>
     </div>
-    ${computeDiscountAmounts(caseTotal + XRAY_SUBTOTAL, discounts).map((amt, i) => {
+    ${computeDiscountAmounts(discCtx, discounts).map((amt, i) => {
       const d     = discounts[i];
       const label = d.fixedPrice !== undefined ? `$${d.fixedPrice.toLocaleString()} target` : `${d.pct}%`;
-      return `<div class="discount-item">
+      return `<div class="discount-item" draggable="true"
+           ondragstart="onDiscDragStart(event,${i})"
+           ondragover="onDiscDragOver(event,${i})"
+           ondrop="onDiscDrop(event,${i})"
+           ondragend="onDiscDragEnd(event)">
+        <span class="drag-handle">⠿</span>
         <span>${d.name}</span>
         <span>${label}</span>
         <span class="discount-amt">-${fmt(amt)}</span>
         <button class="btn btn-danger" onclick="removeDiscount(${i})">✕</button>
       </div>`;
     }).join('')}`;
+}
+
+// ── Discount drag and drop ────────────────────────────────────────────
+let discDragSrcIdx = null;
+function onDiscDragStart(e, i) {
+  discDragSrcIdx = i;
+  setTimeout(() => e.target.classList.add('dragging'), 0);
+}
+function onDiscDragOver(e, i) {
+  e.preventDefault();
+  document.querySelectorAll('.discount-item').forEach((el, idx) => {
+    el.classList.toggle('drag-over', idx === i && i !== discDragSrcIdx);
+  });
+}
+function onDiscDrop(e, i) {
+  e.preventDefault();
+  if (discDragSrcIdx === null || discDragSrcIdx === i) return;
+  const item = discounts.splice(discDragSrcIdx, 1)[0];
+  discounts.splice(i, 0, item);
+  discDragSrcIdx = null;
+  renderDiscountList();
+  renderSubtotal();
+}
+function onDiscDragEnd(e) {
+  e.target.classList.remove('dragging');
+  document.querySelectorAll('.discount-item').forEach(el => el.classList.remove('drag-over'));
+  discDragSrcIdx = null;
 }
 
 // ── Live subtotal ─────────────────────────────────────────────────────
@@ -1270,7 +1342,7 @@ function renderSubtotal() {
   const grandTotal = upperTotal + lowerTotal;
 
   const effectiveTotal    = grandTotal + XRAY_SUBTOTAL;
-  const discountAmts      = computeDiscountAmounts(effectiveTotal, discounts);
+  const discountAmts      = computeDiscountAmounts({ total: effectiveTotal, upperTotal, lowerTotal, xray: XRAY_SUBTOTAL }, discounts);
   const totalDiscountAmt  = discountAmts.reduce((s, a) => s + a, 0);
   const finalTotal        = grandTotal - totalDiscountAmt;
 
@@ -1372,16 +1444,81 @@ function renderProcList() {
              ondragend="onDragEnd(event)">
           <span class="drag-handle">⠿</span>
           <span>${p.name}<span class="badge ${sCls[p.section]}">${sLabel[p.section]}</span></span>
-          <span class="proc-teeth">${p.teeth}</span>
+          <span class="proc-teeth editable" title="Click to edit teeth" onclick="startEditTeeth(${i})">${p.teeth}</span>
           <span>${p.units}</span>
           <input class="price-input" type="number" value="${p.price}" min="0" step="5"
                  onchange="updateProcPrice(${i}, this.value)"
                  ondragstart="event.stopPropagation()"
                  onclick="event.stopPropagation()">
           <span id="proc-total-${i}">${fmt(p.total)}</span>
-          <button class="btn btn-danger" onclick="removeProcedure(${i})">✕</button>
+          <span class="proc-actions">
+            <button class="btn-edit" title="Edit teeth" onclick="startEditTeeth(${i})">✏️</button>
+            <button class="btn btn-danger" onclick="removeProcedure(${i})">✕</button>
+          </span>
         </div>
+        ${editingProcIdx === i ? renderEditPanel(i) : ''}
       `).join('')}
+    </div>`;
+}
+
+// ── Inline teeth editor ───────────────────────────────────────────────
+let editingProcIdx = null;
+let editTeethSel   = new Set();
+
+function startEditTeeth(i) {
+  editingProcIdx = i;
+  editTeethSel   = new Set(parseTeeth(procedures[i].teeth));
+  renderProcList();
+}
+
+function toggleEditTooth(n) {
+  if (editTeethSel.has(n)) editTeethSel.delete(n);
+  else editTeethSel.add(n);
+  renderProcList();
+}
+
+function cancelEditTeeth() {
+  editingProcIdx = null;
+  editTeethSel.clear();
+  renderProcList();
+}
+
+function saveEditTeeth() {
+  const nums = [...editTeethSel].sort((a, b) => a - b);
+  if (!nums.length) { alert('Please select at least one tooth.'); return; }
+  const p   = procedures[editingProcIdx];
+  p.teeth   = nums.join(', ');
+  p.units   = nums.length;
+  p.section = getSection(p.teeth);          // upper / lower / mixed
+  p.total   = p.price * p.units;
+  editingProcIdx = null;
+  editTeethSel.clear();
+  renderProcList();
+  renderSubtotal();
+  renderDiscountList();                      // arch totals may have changed
+}
+
+function renderEditPanel(i) {
+  const toothBtn = n =>
+    `<button type="button" class="tooth-btn ${editTeethSel.has(n) ? 'selected' : ''}" onclick="toggleEditTooth(${n})">${n}</button>`;
+  const upperBtns = Array.from({length:16}, (_,k) => k + 1).map(toothBtn).join('');
+  const lowerBtns = Array.from({length:16}, (_,k) => 32 - k).map(toothBtn).join('');
+  const sorted = [...editTeethSel].sort((a, b) => a - b);
+  const selText = sorted.length
+    ? `${sorted.length} ${sorted.length === 1 ? 'tooth' : 'teeth'} selected: ${sorted.join(', ')}`
+    : 'No teeth selected';
+  return `
+    <div class="proc-edit-panel">
+      <div class="proc-edit-title">Edit Teeth — ${procedures[i].name}</div>
+      <div class="tooth-picker">
+        <div class="tooth-arch-row"><span class="tooth-arch-tag">Upper</span><div class="tooth-grid">${upperBtns}</div></div>
+        <div class="tooth-arch-row"><span class="tooth-arch-tag">Lower</span><div class="tooth-grid">${lowerBtns}</div></div>
+      </div>
+      <div class="proc-edit-sel ${sorted.length ? 'has-teeth' : ''}">${selText}</div>
+      <div class="proc-edit-actions">
+        <button class="btn btn-secondary" onclick="cancelEditTeeth()">Cancel</button>
+        <button class="btn btn-primary"   onclick="saveEditTeeth()">Save Teeth</button>
+      </div>
     </div>`;
 }
 
@@ -1581,8 +1718,10 @@ async function uploadToGHL(btn) {
     // Compute treatment totals
     const upper            = procedures.filter(p => p.section === 'upper');
     const lower            = procedures.filter(p => p.section === 'lower' || p.section === 'mixed');
-    const caseTotal        = upper.reduce((s, p) => s + p.total, 0) + lower.reduce((s, p) => s + p.total, 0) + XRAY_SUBTOTAL;
-    const tpDiscountAmts   = computeDiscountAmounts(caseTotal, discounts);
+    const upperTotal       = upper.reduce((s, p) => s + p.total, 0);
+    const lowerTotal       = lower.reduce((s, p) => s + p.total, 0);
+    const caseTotal        = upperTotal + lowerTotal + XRAY_SUBTOTAL;
+    const tpDiscountAmts   = computeDiscountAmounts({ total: caseTotal, upperTotal, lowerTotal, xray: XRAY_SUBTOTAL }, discounts);
     const totalDiscountAmt = tpDiscountAmts.reduce((s, a) => s + a, 0);
 
     // Ceramic treatment plan flag: 1 if any ceramic implant procedure is present, else 0
@@ -1651,7 +1790,7 @@ function renderTreatmentPlan() {
   const lowerTotal = lower.reduce((s, p) => s + p.total, 0);
   const xraySubtotal = 250;
   const caseTotal    = upperTotal + lowerTotal + xraySubtotal;
-  const tpDiscountAmts   = computeDiscountAmounts(caseTotal, discounts);
+  const tpDiscountAmts   = computeDiscountAmounts({ total: caseTotal, upperTotal, lowerTotal, xray: xraySubtotal }, discounts);
   const totalDiscountAmt = tpDiscountAmts.reduce((s, a) => s + a, 0);
   const subtotal         = caseTotal - totalDiscountAmt;
 
