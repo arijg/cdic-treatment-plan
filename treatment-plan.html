@@ -345,6 +345,17 @@ input[type=text], input[type=tel], input[type=email] {
   min-width: 38px;
   flex-shrink: 0;
 }
+.tooth-arch-tag.clickable {
+  cursor: pointer;
+  padding: 3px 6px;
+  border-radius: 5px;
+  border: 1.5px solid transparent;
+  transition: background .12s, color .12s, border-color .12s;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+.tooth-arch-tag.clickable:hover { color: #1d4e99; background: #eef4ff; }
+.tooth-arch-tag.clickable.active { background: #1d4e99; color: #fff; border-color: #1d4e99; }
 .tooth-grid {
   display: grid;
   grid-template-columns: repeat(16, 1fr);
@@ -818,14 +829,14 @@ input[type=text], input[type=tel], input[type=email] {
 
         <!-- Tooth picker -->
         <div class="form-group" style="margin-top:4px">
-          <label>Tooth Numbers <span style="font-weight:400;color:#888">(shift-click for a range)</span></label>
+          <label>Tooth Numbers <span style="font-weight:400;color:#888">(shift-click for a range · click Upper/Lower for full arch)</span></label>
           <div class="tooth-picker">
             <div class="tooth-arch-row">
-              <span class="tooth-arch-tag">Upper</span>
+              <span class="tooth-arch-tag clickable" id="archTagUpper" title="Select whole upper arch (1 unit)" onclick="toggleFullArch('upper')">Upper</span>
               <div class="tooth-grid" id="upperTeethGrid"></div>
             </div>
             <div class="tooth-arch-row">
-              <span class="tooth-arch-tag">Lower</span>
+              <span class="tooth-arch-tag clickable" id="archTagLower" title="Select whole lower arch (1 unit)" onclick="toggleFullArch('lower')">Lower</span>
               <div class="tooth-grid" id="lowerTeethGrid"></div>
             </div>
             <div class="tooth-sel-row">
@@ -1046,11 +1057,20 @@ function getSection(teethStr) {
 }
 
 function currentUnits() {
+  if (fullArchSel) return 1;
   return parseTeeth(document.getElementById('teethInput').value).length || 0;
 }
 
 // ── Tooth picker ──────────────────────────────────────────────────────
 const toothSel = new Set();
+let fullArchSel = null; // null | 'upper' | 'lower' — whole-arch (1 unit) selection
+
+function toggleFullArch(arch) {
+  fullArchSel = (fullArchSel === arch) ? null : arch;
+  toothSel.clear();
+  lastToothClicked = null;
+  syncTeethInput();
+}
 
 function buildToothGrids() {
   const upper = document.getElementById('upperTeethGrid');
@@ -1066,6 +1086,7 @@ function buildToothGrids() {
 let lastToothClicked = null;
 
 function toggleTooth(n, e) {
+  fullArchSel = null; // picking individual teeth exits full-arch mode
   if (e && e.shiftKey && lastToothClicked !== null) {
     // Shift-click: select every tooth between the previous click and this one
     const lo = Math.min(lastToothClicked, n);
@@ -1081,11 +1102,31 @@ function toggleTooth(n, e) {
 
 function clearTeeth() {
   toothSel.clear();
+  fullArchSel = null;
   lastToothClicked = null;
   syncTeethInput();
 }
 
 function syncTeethInput() {
+  const txt = document.getElementById('toothSelText');
+  const clr = document.getElementById('clearTeethBtn');
+  const tagU = document.getElementById('archTagUpper');
+  const tagL = document.getElementById('archTagLower');
+
+  // Reflect full-arch state on the Upper/Lower labels
+  if (tagU) tagU.classList.toggle('active', fullArchSel === 'upper');
+  if (tagL) tagL.classList.toggle('active', fullArchSel === 'lower');
+
+  if (fullArchSel) {
+    document.getElementById('teethInput').value = 'Full Arch';
+    document.querySelectorAll('.tooth-btn').forEach(btn => btn.classList.remove('selected'));
+    txt.textContent = `Full ${fullArchSel === 'upper' ? 'Upper' : 'Lower'} Arch — 1 unit`;
+    txt.classList.add('has-teeth');
+    clr.style.display = 'inline-block';
+    onTeethInput();
+    return;
+  }
+
   const sorted = [...toothSel].sort((a,b) => a-b);
   document.getElementById('teethInput').value = sorted.join(', ');
   // Update button visuals
@@ -1093,14 +1134,12 @@ function syncTeethInput() {
     btn.classList.toggle('selected', toothSel.has(+btn.dataset.tooth));
   });
   // Update selection text
-  const txt = document.getElementById('toothSelText');
-  const clr = document.getElementById('clearTeethBtn');
   if (sorted.length === 0) {
     txt.textContent = 'No teeth selected';
     txt.classList.remove('has-teeth');
     clr.style.display = 'none';
   } else {
-    txt.textContent = `${sorted.length} tooth${sorted.length !== 1 ? 's' : ''} selected: ${sorted.join(', ')}`;
+    txt.textContent = `${sorted.length} ${sorted.length === 1 ? 'tooth' : 'teeth'} selected: ${sorted.join(', ')}`;
     txt.classList.add('has-teeth');
     clr.style.display = 'inline-block';
   }
@@ -1175,6 +1214,34 @@ function addProcedure(skipDupeCheck) {
 
   if (!name)          { alert('Please enter a treatment name.'); return; }
   if (!price || price <= 0) { alert('Please enter a valid price.'); return; }
+
+  // ── Full-arch (whole-arch, 1 unit) path ──────────────────────────────
+  if (fullArchSel) {
+    const section = fullArchSel;
+    if (!skipDupeCheck) {
+      const dupe = procedures.find(p =>
+        p.name.toLowerCase().trim() === name.toLowerCase().trim() &&
+        p.teeth === 'Full Arch' && p.section === section);
+      if (dupe) {
+        document.getElementById('dupeModalBody').innerHTML =
+          `<strong>${name}</strong> is already in the plan as a full ${section} arch. ` +
+          `Are you sure you want to add it again?`;
+        _pendingProc = { fullArch: section, name, price };
+        document.getElementById('dupeModal').classList.add('open');
+        return;
+      }
+    }
+    procedures.push({ name, price, teeth: 'Full Arch', units: 1, section, total: price });
+    document.getElementById('txInput').value    = '';
+    document.getElementById('priceInput').value = '';
+    clearTeeth();
+    document.getElementById('calcHint').style.display = 'none';
+    renderProcList();
+    renderSubtotal();
+    renderDiscountList();
+    return;
+  }
+
   if (!teeth)         { alert('Please enter tooth numbers.'); return; }
 
   const nums    = parseTeeth(teeth);
@@ -1487,17 +1554,33 @@ function renderProcList() {
 // ── Inline teeth editor ───────────────────────────────────────────────
 let editingProcIdx = null;
 let editTeethSel   = new Set();
+let editFullArch   = null; // null | 'upper' | 'lower'
 
 let lastEditToothClicked = null;
 
 function startEditTeeth(i) {
   editingProcIdx = i;
-  editTeethSel   = new Set(parseTeeth(procedures[i].teeth));
+  const p = procedures[i];
+  if (p.teeth === 'Full Arch') {
+    editFullArch = p.section;
+    editTeethSel = new Set();
+  } else {
+    editFullArch = null;
+    editTeethSel = new Set(parseTeeth(p.teeth));
+  }
+  lastEditToothClicked = null;
+  renderProcList();
+}
+
+function toggleEditFullArch(arch) {
+  editFullArch = (editFullArch === arch) ? null : arch;
+  editTeethSel.clear();
   lastEditToothClicked = null;
   renderProcList();
 }
 
 function toggleEditTooth(n, e) {
+  editFullArch = null; // picking individual teeth exits full-arch mode
   if (e && e.shiftKey && lastEditToothClicked !== null) {
     const lo = Math.min(lastEditToothClicked, n);
     const hi = Math.max(lastEditToothClicked, n);
@@ -1513,19 +1596,28 @@ function toggleEditTooth(n, e) {
 function cancelEditTeeth() {
   editingProcIdx = null;
   editTeethSel.clear();
+  editFullArch = null;
   renderProcList();
 }
 
 function saveEditTeeth() {
-  const nums = [...editTeethSel].sort((a, b) => a - b);
-  if (!nums.length) { alert('Please select at least one tooth.'); return; }
-  const p   = procedures[editingProcIdx];
-  p.teeth   = nums.join(', ');
-  p.units   = nums.length;
-  p.section = getSection(p.teeth);          // upper / lower / mixed
-  p.total   = p.price * p.units;
+  const p = procedures[editingProcIdx];
+  if (editFullArch) {
+    p.teeth   = 'Full Arch';
+    p.units   = 1;
+    p.section = editFullArch;
+    p.total   = p.price * 1;
+  } else {
+    const nums = [...editTeethSel].sort((a, b) => a - b);
+    if (!nums.length) { alert('Please select at least one tooth.'); return; }
+    p.teeth   = nums.join(', ');
+    p.units   = nums.length;
+    p.section = getSection(p.teeth);          // upper / lower / mixed
+    p.total   = p.price * p.units;
+  }
   editingProcIdx = null;
   editTeethSel.clear();
+  editFullArch = null;
   renderProcList();
   renderSubtotal();
   renderDiscountList();                      // arch totals may have changed
@@ -1537,17 +1629,21 @@ function renderEditPanel(i) {
   const upperBtns = Array.from({length:16}, (_,k) => k + 1).map(toothBtn).join('');
   const lowerBtns = Array.from({length:16}, (_,k) => 32 - k).map(toothBtn).join('');
   const sorted = [...editTeethSel].sort((a, b) => a - b);
-  const selText = sorted.length
-    ? `${sorted.length} ${sorted.length === 1 ? 'tooth' : 'teeth'} selected: ${sorted.join(', ')}`
-    : 'No teeth selected';
+  const selText = editFullArch
+    ? `Full ${editFullArch === 'upper' ? 'Upper' : 'Lower'} Arch — 1 unit`
+    : (sorted.length
+        ? `${sorted.length} ${sorted.length === 1 ? 'tooth' : 'teeth'} selected: ${sorted.join(', ')}`
+        : 'No teeth selected');
+  const tag = (arch, label) =>
+    `<span class="tooth-arch-tag clickable ${editFullArch === arch ? 'active' : ''}" title="Select whole ${arch} arch (1 unit)" onclick="toggleEditFullArch('${arch}')">${label}</span>`;
   return `
     <div class="proc-edit-panel">
-      <div class="proc-edit-title">Edit Teeth — ${procedures[i].name} <span style="font-weight:400;text-transform:none;letter-spacing:0;color:#888">(shift-click for a range)</span></div>
+      <div class="proc-edit-title">Edit Teeth — ${procedures[i].name} <span style="font-weight:400;text-transform:none;letter-spacing:0;color:#888">(shift-click range · click Upper/Lower for full arch)</span></div>
       <div class="tooth-picker">
-        <div class="tooth-arch-row"><span class="tooth-arch-tag">Upper</span><div class="tooth-grid">${upperBtns}</div></div>
-        <div class="tooth-arch-row"><span class="tooth-arch-tag">Lower</span><div class="tooth-grid">${lowerBtns}</div></div>
+        <div class="tooth-arch-row">${tag('upper','Upper')}<div class="tooth-grid">${upperBtns}</div></div>
+        <div class="tooth-arch-row">${tag('lower','Lower')}<div class="tooth-grid">${lowerBtns}</div></div>
       </div>
-      <div class="proc-edit-sel ${sorted.length ? 'has-teeth' : ''}">${selText}</div>
+      <div class="proc-edit-sel ${(editFullArch || sorted.length) ? 'has-teeth' : ''}">${selText}</div>
       <div class="proc-edit-actions">
         <button class="btn btn-secondary" onclick="cancelEditTeeth()">Cancel</button>
         <button class="btn btn-primary"   onclick="saveEditTeeth()">Save Teeth</button>
