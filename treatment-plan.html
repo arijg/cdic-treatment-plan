@@ -1352,10 +1352,10 @@ function renderSubtotal() {
   const lowerTotal = lower.reduce((s, p) => s + p.total, 0);
   const grandTotal = upperTotal + lowerTotal;
 
-  const effectiveTotal    = grandTotal + XRAY_SUBTOTAL;
-  const discountAmts      = computeDiscountAmounts({ total: effectiveTotal, upperTotal, lowerTotal, xray: XRAY_SUBTOTAL }, discounts);
+  const caseTotal         = grandTotal + XRAY_SUBTOTAL;
+  const discountAmts      = computeDiscountAmounts({ total: caseTotal, upperTotal, lowerTotal, xray: XRAY_SUBTOTAL }, discounts);
   const totalDiscountAmt  = discountAmts.reduce((s, a) => s + a, 0);
-  const finalTotal        = grandTotal - totalDiscountAmt;
+  const finalTotal        = caseTotal - totalDiscountAmt;
 
   let html = '';
   if (upper.length) {
@@ -1366,7 +1366,9 @@ function renderSubtotal() {
     html += `<div class="subtotal-item"><span class="subtotal-item-label">Lower</span><span class="subtotal-item-value">${fmt(lowerTotal)}</span></div>`;
   }
   html += `<div class="subtotal-divider"></div>`;
-  html += `<div class="subtotal-item grand"><span class="subtotal-item-label">Total Complete Case</span><span class="subtotal-item-value">${fmt(grandTotal)}</span></div>`;
+  html += `<div class="subtotal-item"><span class="subtotal-item-label">X-Ray</span><span class="subtotal-item-value">${fmt(XRAY_SUBTOTAL)}</span></div>`;
+  html += `<div class="subtotal-divider"></div>`;
+  html += `<div class="subtotal-item grand"><span class="subtotal-item-label">Total Complete Case</span><span class="subtotal-item-value">${fmt(caseTotal)}</span></div>`;
   if (discounts.length) {
     discounts.forEach((d, i) => {
       const amt   = discountAmts[i];
