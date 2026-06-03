@@ -818,7 +818,7 @@ input[type=text], input[type=tel], input[type=email] {
 
         <!-- Tooth picker -->
         <div class="form-group" style="margin-top:4px">
-          <label>Tooth Numbers</label>
+          <label>Tooth Numbers <span style="font-weight:400;color:#888">(shift-click for a range)</span></label>
           <div class="tooth-picker">
             <div class="tooth-arch-row">
               <span class="tooth-arch-tag">Upper</span>
@@ -1046,21 +1046,32 @@ function buildToothGrids() {
   const upper = document.getElementById('upperTeethGrid');
   const lower = document.getElementById('lowerTeethGrid');
   upper.innerHTML = Array.from({length:16}, (_,i) => i+1).map(n =>
-    `<button type="button" class="tooth-btn" data-tooth="${n}" onclick="toggleTooth(${n})">${n}</button>`
+    `<button type="button" class="tooth-btn" data-tooth="${n}" onclick="toggleTooth(${n}, event)">${n}</button>`
   ).join('');
   lower.innerHTML = Array.from({length:16}, (_,i) => 32-i).map(n =>
-    `<button type="button" class="tooth-btn" data-tooth="${n}" onclick="toggleTooth(${n})">${n}</button>`
+    `<button type="button" class="tooth-btn" data-tooth="${n}" onclick="toggleTooth(${n}, event)">${n}</button>`
   ).join('');
 }
 
-function toggleTooth(n) {
-  if (toothSel.has(n)) toothSel.delete(n);
-  else toothSel.add(n);
+let lastToothClicked = null;
+
+function toggleTooth(n, e) {
+  if (e && e.shiftKey && lastToothClicked !== null) {
+    // Shift-click: select every tooth between the previous click and this one
+    const lo = Math.min(lastToothClicked, n);
+    const hi = Math.max(lastToothClicked, n);
+    for (let t = lo; t <= hi; t++) toothSel.add(t);
+  } else {
+    if (toothSel.has(n)) toothSel.delete(n);
+    else toothSel.add(n);
+  }
+  lastToothClicked = n;
   syncTeethInput();
 }
 
 function clearTeeth() {
   toothSel.clear();
+  lastToothClicked = null;
   syncTeethInput();
 }
 
@@ -1465,15 +1476,25 @@ function renderProcList() {
 let editingProcIdx = null;
 let editTeethSel   = new Set();
 
+let lastEditToothClicked = null;
+
 function startEditTeeth(i) {
   editingProcIdx = i;
   editTeethSel   = new Set(parseTeeth(procedures[i].teeth));
+  lastEditToothClicked = null;
   renderProcList();
 }
 
-function toggleEditTooth(n) {
-  if (editTeethSel.has(n)) editTeethSel.delete(n);
-  else editTeethSel.add(n);
+function toggleEditTooth(n, e) {
+  if (e && e.shiftKey && lastEditToothClicked !== null) {
+    const lo = Math.min(lastEditToothClicked, n);
+    const hi = Math.max(lastEditToothClicked, n);
+    for (let t = lo; t <= hi; t++) editTeethSel.add(t);
+  } else {
+    if (editTeethSel.has(n)) editTeethSel.delete(n);
+    else editTeethSel.add(n);
+  }
+  lastEditToothClicked = n;
   renderProcList();
 }
 
@@ -1500,7 +1521,7 @@ function saveEditTeeth() {
 
 function renderEditPanel(i) {
   const toothBtn = n =>
-    `<button type="button" class="tooth-btn ${editTeethSel.has(n) ? 'selected' : ''}" onclick="toggleEditTooth(${n})">${n}</button>`;
+    `<button type="button" class="tooth-btn ${editTeethSel.has(n) ? 'selected' : ''}" onclick="toggleEditTooth(${n}, event)">${n}</button>`;
   const upperBtns = Array.from({length:16}, (_,k) => k + 1).map(toothBtn).join('');
   const lowerBtns = Array.from({length:16}, (_,k) => 32 - k).map(toothBtn).join('');
   const sorted = [...editTeethSel].sort((a, b) => a - b);
@@ -1509,7 +1530,7 @@ function renderEditPanel(i) {
     : 'No teeth selected';
   return `
     <div class="proc-edit-panel">
-      <div class="proc-edit-title">Edit Teeth — ${procedures[i].name}</div>
+      <div class="proc-edit-title">Edit Teeth — ${procedures[i].name} <span style="font-weight:400;text-transform:none;letter-spacing:0;color:#888">(shift-click for a range)</span></div>
       <div class="tooth-picker">
         <div class="tooth-arch-row"><span class="tooth-arch-tag">Upper</span><div class="tooth-grid">${upperBtns}</div></div>
         <div class="tooth-arch-row"><span class="tooth-arch-tag">Lower</span><div class="tooth-grid">${lowerBtns}</div></div>
