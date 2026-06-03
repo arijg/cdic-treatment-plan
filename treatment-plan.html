@@ -990,8 +990,9 @@ const XRAY_SUBTOTAL = 250;
 // { total, upperTotal, lowerTotal, xray } so arch-scoped specials can be computed.
 //   • percentage discounts apply to `total`
 //   • arch fixed-price specials bring that arch's procedures down to fixedPrice.
-//     The single shared X-ray is folded into the FIRST arch special only, so when
-//     both arches get the special the total is (fixedPrice × 2), not short by the X-ray.
+//     The single shared X-ray is split EVENLY across all arch specials, so two
+//     arch specials each absorb half the X-ray — both lines show the same amount
+//     and the total is (fixedPrice × 2), not short by the X-ray.
 //   • legacy whole-case fixed-price (no arch) brings the after-percent total down to fixedPrice
 function computeDiscountAmounts(ctx, discountList) {
   if (typeof ctx === 'number') ctx = { total: ctx, upperTotal: 0, lowerTotal: 0, xray: 0 };
@@ -1002,14 +1003,16 @@ function computeDiscountAmounts(ctx, discountList) {
     .reduce((s, d) => s + total * (d.pct / 100), 0);
   const afterPct = total - pctTotal;
 
-  let xrayUsed = false; // the single X-ray attaches to the first arch special only
+  const archSpecialCount = discountList.filter(
+    d => d.fixedPrice !== undefined && (d.arch === 'upper' || d.arch === 'lower')
+  ).length;
+  const xrayPerArch = archSpecialCount > 0 ? xray / archSpecialCount : 0;
+
   return discountList.map(d => {
     if (d.fixedPrice === undefined) return total * (d.pct / 100); // percentage
     if (d.arch === 'upper' || d.arch === 'lower') {
       const archTotal = d.arch === 'upper' ? upperTotal : lowerTotal;
-      const x = xrayUsed ? 0 : xray;
-      xrayUsed = true;
-      return Math.max(0, (archTotal + x) - d.fixedPrice);
+      return Math.max(0, (archTotal + xrayPerArch) - d.fixedPrice);
     }
     return Math.max(0, afterPct - d.fixedPrice); // legacy whole-case
   });
