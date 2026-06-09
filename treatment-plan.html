@@ -983,6 +983,7 @@ const TREATMENTS = [
 const DISCOUNT_PRESETS = [
   "Upper Arch $18,900 Special",
   "Lower Arch $18,900 Special",
+  "Free Extractions",
   "Senior Citizen Discount",
   "Military Appreciation Discount",
   "Spring Renewal Special",
@@ -990,6 +991,8 @@ const DISCOUNT_PRESETS = [
   "The Fall Confidence Special",
   "New Year, New Smile",
 ];
+// Presets that aren't percentage-based (the % field is disabled when chosen).
+const NON_PCT_PRESETS = new Set(["Free Extractions"]);
 // Fixed-price presets → target price + which arch the special applies to.
 const FIXED_PRICE_PRESETS = {
   "Upper Arch $18,900 Special": { fixedPrice: 18900, arch: 'upper' },
@@ -1006,12 +1009,13 @@ const XRAY_SUBTOTAL = 250;
 //     arch specials each absorb half the X-ray — both lines show the same amount
 //     and the total is (fixedPrice × 2), not short by the X-ray.
 //   • legacy whole-case fixed-price (no arch) brings the after-percent total down to fixedPrice
+//   • "Free Extractions" (extractionsFree) deducts the full cost of all extraction lines
 function computeDiscountAmounts(ctx, discountList) {
-  if (typeof ctx === 'number') ctx = { total: ctx, upperTotal: 0, lowerTotal: 0, xray: 0 };
-  const { total, upperTotal = 0, lowerTotal = 0, xray = XRAY_SUBTOTAL } = ctx;
+  if (typeof ctx === 'number') ctx = { total: ctx, upperTotal: 0, lowerTotal: 0, xray: 0, extractionsTotal: 0 };
+  const { total, upperTotal = 0, lowerTotal = 0, xray = XRAY_SUBTOTAL, extractionsTotal = 0 } = ctx;
 
   const pctTotal = discountList
-    .filter(d => d.fixedPrice === undefined)
+    .filter(d => d.pct !== undefined)
     .reduce((s, d) => s + total * (d.pct / 100), 0);
   const afterPct = total - pctTotal;
 
@@ -1021,13 +1025,19 @@ function computeDiscountAmounts(ctx, discountList) {
   const xrayPerArch = archSpecialCount > 0 ? xray / archSpecialCount : 0;
 
   return discountList.map(d => {
-    if (d.fixedPrice === undefined) return total * (d.pct / 100); // percentage
+    if (d.extractionsFree)       return Math.max(0, extractionsTotal);  // free extractions
+    if (d.pct !== undefined)     return total * (d.pct / 100);          // percentage
     if (d.arch === 'upper' || d.arch === 'lower') {
       const archTotal = d.arch === 'upper' ? upperTotal : lowerTotal;
       return Math.max(0, (archTotal + xrayPerArch) - d.fixedPrice);
     }
     return Math.max(0, afterPct - d.fixedPrice); // legacy whole-case
   });
+}
+
+// Sum of all extraction line totals (used by the "Free Extractions" discount).
+function extractionsSubtotal() {
+  return procedures.filter(p => isExtraction(p.name)).reduce((s, p) => s + p.total, 0);
 }
 
 // ── State ──────────────────────────────────────────────────────────────
@@ -1345,7 +1355,7 @@ function selectDiscount(e, name) {
   document.getElementById('discountName').value = name;
   document.getElementById('acDiscountList').style.display = 'none';
   const pctEl = document.getElementById('discountPct');
-  if (FIXED_PRICE_PRESETS[name] !== undefined) {
+  if (FIXED_PRICE_PRESETS[name] !== undefined || NON_PCT_PRESETS.has(name)) {
     pctEl.value = '';
     pctEl.placeholder = 'N/A';
     pctEl.disabled = true;
@@ -1364,6 +1374,8 @@ function addDiscount() {
   if (FIXED_PRICE_PRESETS[name] !== undefined) {
     const preset = FIXED_PRICE_PRESETS[name];
     discounts.push({ name, fixedPrice: preset.fixedPrice, arch: preset.arch });
+  } else if (name === 'Free Extractions') {
+    discounts.push({ name, extractionsFree: true });
   } else {
     const pct = parseFloat(pctEl.value);
     if (!pct || pct <= 0) { alert('Please enter a valid discount percentage.'); return; }
@@ -1391,14 +1403,16 @@ function renderDiscountList() {
   const upperTotal = upper.reduce((s,p) => s+p.total, 0);
   const lowerTotal = lower.reduce((s,p) => s+p.total, 0);
   const caseTotal = upperTotal + lowerTotal;
-  const discCtx = { total: caseTotal + XRAY_SUBTOTAL, upperTotal, lowerTotal, xray: XRAY_SUBTOTAL };
+  const discCtx = { total: caseTotal + XRAY_SUBTOTAL, upperTotal, lowerTotal, xray: XRAY_SUBTOTAL, extractionsTotal: extractionsSubtotal() };
   wrap.innerHTML = `
     <div class="discount-item-header">
       <span></span><span>Name</span><span>%</span><span>Amount</span><span></span>
     </div>
     ${computeDiscountAmounts(discCtx, discounts).map((amt, i) => {
       const d     = discounts[i];
-      const label = d.fixedPrice !== undefined ? `$${d.fixedPrice.toLocaleString()} target` : `${d.pct}%`;
+      const label = d.extractionsFree   ? 'All extractions'
+                  : d.fixedPrice !== undefined ? `$${d.fixedPrice.toLocaleString()} target`
+                  : `${d.pct}%`;
       return `<div class="discount-item" draggable="true"
            ondragstart="onDiscDragStart(event,${i})"
            ondragover="onDiscDragOver(event,${i})"
@@ -1454,7 +1468,7 @@ function renderSubtotal() {
   const grandTotal = upperTotal + lowerTotal;
 
   const caseTotal         = grandTotal + XRAY_SUBTOTAL;
-  const discountAmts      = computeDiscountAmounts({ total: caseTotal, upperTotal, lowerTotal, xray: XRAY_SUBTOTAL }, discounts);
+  const discountAmts      = computeDiscountAmounts({ total: caseTotal, upperTotal, lowerTotal, xray: XRAY_SUBTOTAL, extractionsTotal: extractionsSubtotal() }, discounts);
   const totalDiscountAmt  = discountAmts.reduce((s, a) => s + a, 0);
   const finalTotal        = caseTotal - totalDiscountAmt;
 
@@ -1473,7 +1487,7 @@ function renderSubtotal() {
   if (discounts.length) {
     discounts.forEach((d, i) => {
       const amt   = discountAmts[i];
-      const label = d.fixedPrice !== undefined ? d.name : `${d.name} ${d.pct}%`;
+      const label = (d.fixedPrice !== undefined || d.extractionsFree) ? d.name : `${d.name} ${d.pct}%`;
       html += `<div class="subtotal-divider"></div><div class="subtotal-item"><span class="subtotal-item-label" style="color:rgba(255,255,255,.8)">${label}</span><span class="subtotal-item-value" style="color:#fca5a5">-${fmt(amt)}</span></div>`;
     });
     html += `<div class="subtotal-divider"></div>`;
@@ -1489,6 +1503,7 @@ function removeProcedure(i) {
   procedures.splice(i, 1);
   renderProcList();
   renderSubtotal();
+  renderDiscountList();   // keep dynamic discounts (e.g. Free Extractions) in sync
 }
 
 // ── Inline price edit ────────────────────────────────────────────────
@@ -1500,6 +1515,7 @@ function updateProcPrice(i, val) {
   const totalEl = document.getElementById('proc-total-' + i);
   if (totalEl) totalEl.textContent = fmt(procedures[i].total);
   renderSubtotal();
+  renderDiscountList();   // keep dynamic discounts (e.g. Free Extractions) in sync
 }
 
 // ── Drag and drop ────────────────────────────────────────────────────
@@ -1874,7 +1890,7 @@ async function uploadToGHL(btn) {
     const upperTotal       = upper.reduce((s, p) => s + p.total, 0);
     const lowerTotal       = lower.reduce((s, p) => s + p.total, 0);
     const caseTotal        = upperTotal + lowerTotal + XRAY_SUBTOTAL;
-    const tpDiscountAmts   = computeDiscountAmounts({ total: caseTotal, upperTotal, lowerTotal, xray: XRAY_SUBTOTAL }, discounts);
+    const tpDiscountAmts   = computeDiscountAmounts({ total: caseTotal, upperTotal, lowerTotal, xray: XRAY_SUBTOTAL, extractionsTotal: extractionsSubtotal() }, discounts);
     const totalDiscountAmt = tpDiscountAmts.reduce((s, a) => s + a, 0);
 
     // Ceramic treatment plan flag: 1 if any ceramic implant procedure is present, else 0
@@ -1943,7 +1959,7 @@ function renderTreatmentPlan() {
   const lowerTotal = lower.reduce((s, p) => s + p.total, 0);
   const xraySubtotal = 250;
   const caseTotal    = upperTotal + lowerTotal + xraySubtotal;
-  const tpDiscountAmts   = computeDiscountAmounts({ total: caseTotal, upperTotal, lowerTotal, xray: xraySubtotal }, discounts);
+  const tpDiscountAmts   = computeDiscountAmounts({ total: caseTotal, upperTotal, lowerTotal, xray: xraySubtotal, extractionsTotal: extractionsSubtotal() }, discounts);
   const totalDiscountAmt = tpDiscountAmts.reduce((s, a) => s + a, 0);
   const subtotal         = caseTotal - totalDiscountAmt;
 
@@ -1986,7 +2002,7 @@ function renderTreatmentPlan() {
 
   const discountRows = discounts.map((d, i) => {
     const amt   = tpDiscountAmts[i];
-    const label = d.fixedPrice !== undefined ? d.name : `${d.name} ${d.pct}% Off`;
+    const label = (d.fixedPrice !== undefined || d.extractionsFree) ? d.name : `${d.name} ${d.pct}% Off`;
     return `<div class="tp-sum-row discount">
       <span class="tp-sum-label">${label}</span>
       <span class="tp-sum-amt">-${fmt(amt)}</span>
