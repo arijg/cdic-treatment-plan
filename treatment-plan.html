@@ -1208,6 +1208,21 @@ function updateCalc() {
 // ── Add procedure ──────────────────────────────────────────────────────
 let _pendingProc = null; // held while duplicate modal is open
 
+// Auto-pairing: every extraction also gets a Laser-Assisted Bacterial Reduction
+// on the same teeth and quantity.
+const LABR_NAME  = 'Laser-Assisted Bacterial Reduction';
+const LABR_PRICE = 375;
+function isExtraction(name) { return /extraction/i.test(name); }
+
+// Ensure a LABR matching these teeth+section exists. No-op if one already covers
+// the exact same teeth+section (prevents piling up duplicates on re-adds).
+function addLaserFor(teeth, units, section) {
+  const exists = procedures.some(p =>
+    p.name === LABR_NAME && p.teeth === teeth && p.section === section);
+  if (exists) return;
+  procedures.push({ name: LABR_NAME, price: LABR_PRICE, teeth, units, section, total: LABR_PRICE * units });
+}
+
 function addProcedure(skipDupeCheck) {
   const name  = document.getElementById('txInput').value.trim();
   const price = parseFloat(document.getElementById('priceInput').value);
@@ -1233,6 +1248,7 @@ function addProcedure(skipDupeCheck) {
       }
     }
     procedures.push({ name, price, teeth: 'Full Arch', units: 1, section, total: price });
+    if (isExtraction(name)) addLaserFor('Full Arch', 1, section);
     document.getElementById('txInput').value    = '';
     document.getElementById('priceInput').value = '';
     clearTeeth();
@@ -1271,15 +1287,21 @@ function addProcedure(skipDupeCheck) {
   }
 
   // ── Push to procedures ───────────────────────────────────────────────
+  const extraction = isExtraction(name);
   if (section === 'mixed') {
     const upperTeeth = nums.filter(n => n >= 1  && n <= 16);
     const lowerTeeth = nums.filter(n => n >= 17 && n <= 36);
-    if (upperTeeth.length)
+    if (upperTeeth.length) {
       procedures.push({ name, price, teeth: upperTeeth.join(', '), units: upperTeeth.length, section: 'upper', total: price * upperTeeth.length });
-    if (lowerTeeth.length)
+      if (extraction) addLaserFor(upperTeeth.join(', '), upperTeeth.length, 'upper');
+    }
+    if (lowerTeeth.length) {
       procedures.push({ name, price, teeth: lowerTeeth.join(', '), units: lowerTeeth.length, section: 'lower', total: price * lowerTeeth.length });
+      if (extraction) addLaserFor(lowerTeeth.join(', '), lowerTeeth.length, 'lower');
+    }
   } else {
     procedures.push({ name, price, teeth, units, section, total: price * units });
+    if (extraction) addLaserFor(teeth, units, section);
   }
 
   // Reset inputs
@@ -1290,6 +1312,7 @@ function addProcedure(skipDupeCheck) {
 
   renderProcList();
   renderSubtotal();
+  renderDiscountList();
 }
 
 function closeDupeModal() {
