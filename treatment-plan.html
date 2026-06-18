@@ -1849,7 +1849,14 @@ async function uploadToGHL(btn) {
   try {
     // Capture the treatment plan as a canvas
     const element = document.querySelector('.tp-wrap');
+    if (!element) throw new Error('Treatment plan not found on the page.');
     const canvas  = await html2canvas(element, { scale: 2, useCORS: true, backgroundColor: '#fff' });
+
+    // Guard against a zero-size capture — otherwise the page-fitting math below
+    // divides by zero (imgH = Infinity) and the paging loop never terminates.
+    if (!canvas.width || !canvas.height) {
+      throw new Error('Could not render the treatment plan (got a 0-size image). Scroll to the top and try again.');
+    }
 
     // Build PDF (letter size), encrypted with patient's DOB (MMDDYYYY) if provided
     const { jsPDF } = window.jspdf;
@@ -1870,12 +1877,16 @@ async function uploadToGHL(btn) {
     const pageH    = pdf.internal.pageSize.getHeight();
     const imgH     = (canvas.height * pageW) / canvas.width;
 
-    // Add pages if content is taller than one page
-    let yOffset = 0;
-    while (yOffset < imgH) {
+    // Add pages if content is taller than one page (cap at 30 as a safety net
+    // so a bad imgH can never spin into an infinite page loop / frozen tab).
+    if (!isFinite(imgH) || imgH <= 0) throw new Error('Could not size the PDF page (invalid image height).');
+    const imgData = canvas.toDataURL('image/jpeg', 0.95);
+    let yOffset = 0, pageCount = 0;
+    while (yOffset < imgH && pageCount < 30) {
       if (yOffset > 0) pdf.addPage();
-      pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', 0, -yOffset, pageW, imgH);
+      pdf.addImage(imgData, 'JPEG', 0, -yOffset, pageW, imgH);
       yOffset += pageH;
+      pageCount++;
     }
 
     const pdfBase64 = pdf.output('datauristring').split(',')[1];
@@ -1921,12 +1932,10 @@ async function uploadToGHL(btn) {
       }),
     });
 
+    if (!res.ok) throw new Error(`Server returned ${res.status}. Please try again.`);
     const result = await res.json();
     if (!result.success) {
-      btn.innerHTML      = '✗ Error';
-      btn.style.background = '#c0392b';
-      setTimeout(() => { btn.innerHTML = orig; btn.style.background = ''; btn.disabled = false; }, 4000);
-      return;
+      throw new Error(result.error || 'The server could not process the upload.');
     }
 
     btn.innerHTML      = '✓ Sent to GHL';
@@ -1938,6 +1947,8 @@ async function uploadToGHL(btn) {
     btn.innerHTML      = '✗ Error';
     btn.style.background = '#c0392b';
     setTimeout(() => { btn.innerHTML = orig; btn.style.background = ''; btn.disabled = false; }, 4000);
+    // Surface the real reason — the console isn't visible on a phone.
+    alert('Send to GHL failed:\n\n' + (e && e.message ? e.message : e));
   }
 }
 
