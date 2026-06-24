@@ -984,6 +984,7 @@ const DISCOUNT_PRESETS = [
   "Upper Arch $18,900 Special",
   "Lower Arch $18,900 Special",
   "Free Extractions",
+  "Courtesy X-Rays",
   "Senior Citizen Discount",
   "Military Appreciation Discount",
   "Spring Renewal Special",
@@ -992,7 +993,7 @@ const DISCOUNT_PRESETS = [
   "New Year, New Smile",
 ];
 // Presets that aren't percentage-based (the % field is disabled when chosen).
-const NON_PCT_PRESETS = new Set(["Free Extractions"]);
+const NON_PCT_PRESETS = new Set(["Free Extractions", "Courtesy X-Rays"]);
 // Fixed-price presets → target price + which arch the special applies to.
 const FIXED_PRICE_PRESETS = {
   "Upper Arch $18,900 Special": { fixedPrice: 18900, arch: 'upper' },
@@ -1025,8 +1026,9 @@ function computeDiscountAmounts(ctx, discountList) {
   const xrayPerArch = archSpecialCount > 0 ? xray / archSpecialCount : 0;
 
   return discountList.map(d => {
-    if (d.extractionsFree)       return Math.max(0, extractionsTotal);  // free extractions
-    if (d.pct !== undefined)     return total * (d.pct / 100);          // percentage
+    if (d.extractionsFree)         return Math.max(0, extractionsTotal);              // free extractions
+    if (d.fixedAmount !== undefined) return Math.max(0, Math.min(d.fixedAmount, total)); // flat $ off (e.g. courtesy X-rays)
+    if (d.pct !== undefined)       return total * (d.pct / 100);                      // percentage
     if (d.arch === 'upper' || d.arch === 'lower') {
       const archTotal = d.arch === 'upper' ? upperTotal : lowerTotal;
       return Math.max(0, (archTotal + xrayPerArch) - d.fixedPrice);
@@ -1376,6 +1378,8 @@ function addDiscount() {
     discounts.push({ name, fixedPrice: preset.fixedPrice, arch: preset.arch });
   } else if (name === 'Free Extractions') {
     discounts.push({ name, extractionsFree: true });
+  } else if (name === 'Courtesy X-Rays') {
+    discounts.push({ name, fixedAmount: XRAY_SUBTOTAL });
   } else {
     const pct = parseFloat(pctEl.value);
     if (!pct || pct <= 0) { alert('Please enter a valid discount percentage.'); return; }
@@ -1411,6 +1415,7 @@ function renderDiscountList() {
     ${computeDiscountAmounts(discCtx, discounts).map((amt, i) => {
       const d     = discounts[i];
       const label = d.extractionsFree   ? 'All extractions'
+                  : d.fixedAmount !== undefined ? `$${d.fixedAmount.toLocaleString()} off`
                   : d.fixedPrice !== undefined ? `$${d.fixedPrice.toLocaleString()} target`
                   : `${d.pct}%`;
       return `<div class="discount-item" draggable="true"
@@ -1487,7 +1492,7 @@ function renderSubtotal() {
   if (discounts.length) {
     discounts.forEach((d, i) => {
       const amt   = discountAmts[i];
-      const label = (d.fixedPrice !== undefined || d.extractionsFree) ? d.name : `${d.name} ${d.pct}%`;
+      const label = (d.pct !== undefined) ? `${d.name} ${d.pct}%` : d.name;
       html += `<div class="subtotal-divider"></div><div class="subtotal-item"><span class="subtotal-item-label" style="color:rgba(255,255,255,.8)">${label}</span><span class="subtotal-item-value" style="color:#fca5a5">-${fmt(amt)}</span></div>`;
     });
     html += `<div class="subtotal-divider"></div>`;
@@ -2013,7 +2018,7 @@ function renderTreatmentPlan() {
 
   const discountRows = discounts.map((d, i) => {
     const amt   = tpDiscountAmts[i];
-    const label = (d.fixedPrice !== undefined || d.extractionsFree) ? d.name : `${d.name} ${d.pct}% Off`;
+    const label = (d.pct !== undefined) ? `${d.name} ${d.pct}% Off` : d.name;
     return `<div class="tp-sum-row discount">
       <span class="tp-sum-label">${label}</span>
       <span class="tp-sum-amt">-${fmt(amt)}</span>
