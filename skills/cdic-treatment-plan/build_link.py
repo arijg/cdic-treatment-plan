@@ -25,9 +25,16 @@ carry its own price list:
 Usage:
     python build_link.py '<json string>'
     python build_link.py --html /path/to/treatment-plan.html '<json>'
+    python build_link.py --base http://localhost:8743/treatment-plan.html '<json>'
     echo '<json>' | python build_link.py
 
-Output: the full https URL on stdout (any WARNINGs/notices go to stderr).
+To test locally, point --base at a local server (and --html at the local file
+so validation uses your working copy):
+    python build_link.py \
+        --base http://localhost:8743/treatment-plan.html \
+        --html ../../treatment-plan.html '<json>'
+
+Output: the full URL on stdout (any WARNINGs/notices go to stderr).
 """
 import os
 import re
@@ -120,7 +127,7 @@ def validate(data, catalog, source):
 
 
 def parse_args(argv):
-    html_path, positional = None, []
+    html_path, base, positional = None, None, []
     i = 0
     while i < len(argv):
         a = argv[i]
@@ -128,12 +135,17 @@ def parse_args(argv):
             html_path = argv[i + 1]; i += 2; continue
         if a.startswith("--html="):
             html_path = a.split("=", 1)[1]; i += 1; continue
+        if a == "--base":
+            base = argv[i + 1]; i += 2; continue
+        if a.startswith("--base="):
+            base = a.split("=", 1)[1]; i += 1; continue
         positional.append(a); i += 1
-    return html_path, positional
+    return html_path, base, positional
 
 
 def main():
-    html_path, positional = parse_args(sys.argv[1:])
+    html_path, base, positional = parse_args(sys.argv[1:])
+    base = base or os.environ.get("CDIC_TP_BASE") or BASE_URL
     raw = positional[0] if positional else sys.stdin.read()
     data = json.loads(raw)  # raises on invalid JSON — surfaces the problem
 
@@ -142,7 +154,7 @@ def main():
 
     compact = json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     token = base64.urlsafe_b64encode(compact).decode("ascii").rstrip("=")
-    print(f"{BASE_URL}?plan={token}")
+    print(f"{base}?plan={token}")
 
 
 if __name__ == "__main__":
