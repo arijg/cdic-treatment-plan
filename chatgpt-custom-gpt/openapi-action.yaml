@@ -1,0 +1,111 @@
+openapi: 3.1.0
+info:
+  title: CDIC Treatment Plan Link Builder
+  description: Encodes a treatment-plan object into a prefilled link to the CDIC
+    Treatment Plan form. Pure encoder — no data is stored.
+  version: 1.0.0
+servers:
+  - url: https://cdic-ghl-upload.ariel-5fb.workers.dev
+paths:
+  /build-link:
+    post:
+      operationId: buildTreatmentPlanLink
+      summary: Build a prefilled CDIC Treatment Plan link from a plan object.
+      description: Returns a URL to the live treatment-plan form with every field
+        prefilled. The user reviews it and submits it themselves.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Plan"
+      responses:
+        "200":
+          description: The prefilled treatment-plan URL.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    description: The prefilled https link to give the user.
+        "400":
+          description: The plan JSON was invalid.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  error:
+                    type: string
+components:
+  schemas:
+    Plan:
+      type: object
+      description: A CDIC treatment plan. All fields optional; omitted dropdowns
+        fall back to the form's defaults.
+      properties:
+        patient:
+          type: object
+          properties:
+            firstName:
+              type: string
+            lastName:
+              type: string
+            phone:
+              type: string
+              description: Any format; the form reformats it.
+            email:
+              type: string
+            dob:
+              type: string
+              description: Date of birth as YYYY-MM-DD or MM/DD/YYYY.
+        doctor:
+          type: string
+          description: Fuzzy-matched to the dropdown; a last name works. Defaults
+            to "Dr. Dale Goldschlag" if omitted.
+        coordinator:
+          type: string
+          description: Defaults to "Jackie" if omitted.
+        location:
+          type: string
+          description: A keyword like "central park" or "scarsdale" is enough.
+            Defaults to Central Park South if omitted.
+        procedures:
+          type: array
+          items:
+            type: object
+            required: [name]
+            properties:
+              name:
+                type: string
+                description: Exact catalog treatment name (see knowledge file).
+              teeth:
+                type: string
+                description: Comma-separated US universal tooth numbers, e.g.
+                  "14, 15", or the literal "Full Arch".
+              arch:
+                type: string
+                enum: [upper, lower]
+                description: Required when teeth is "Full Arch".
+              price:
+                type: number
+                description: Only for a custom (non-catalog) treatment. Omit for
+                  catalog items — the form fills the live price.
+        discounts:
+          type: array
+          items:
+            type: object
+            required: [name]
+            properties:
+              name:
+                type: string
+                description: Preset name (see knowledge file) or a custom name.
+              pct:
+                type: number
+                description: Required for percentage discounts. Omit for fixed
+                  presets (Free Extractions, Courtesy X-Rays, the $18,900 specials).
+        discountDate:
+          type: string
+          description: "Valid-through date, YYYY-MM-DD. Defaults to end of month."

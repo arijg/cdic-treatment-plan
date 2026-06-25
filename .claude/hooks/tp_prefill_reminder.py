@@ -46,6 +46,11 @@ reminder = (
     "   Open the URL and confirm fields, teeth, totals, and discounts populate with no "
     "console errors. Also re-run build_link.py and confirm no unexpected validation WARNINGs.\n"
     "\n"
+    "4. BOTH FRONT-ENDS — reference.md is shared by the Claude skill AND the ChatGPT "
+    "custom GPT (chatgpt-custom-gpt/), so syncing it covers both. If the form's base URL "
+    "moved, also update build_link.py BASE_URL and the /build-link route in "
+    "cloudflare-worker.js (then redeploy the worker).\n"
+    "\n"
     "Note: production links only work once changes reach main (GitHub Pages serves from main)."
 )
 

@@ -14,6 +14,21 @@ export default {
   async fetch(request, env) {
 
     if (request.method === 'OPTIONS') return cors(null, 204);
+
+    // ── Build a prefilled treatment-plan link (used by the ChatGPT Custom GPT Action) ──
+    // POST /build-link with the plan JSON → { url }. Pure encoder: no GHL calls,
+    // no logging, no storage. The link points at the live form, which reads ?plan=.
+    if (new URL(request.url).pathname === '/build-link') {
+      if (request.method !== 'POST') return cors(JSON.stringify({ error: 'Method not allowed' }), 405);
+      try {
+        const plan = await request.json();
+        const link = `https://arijg.github.io/cdic-treatment-plan/treatment-plan.html?plan=${toBase64Url(JSON.stringify(plan))}`;
+        return cors(JSON.stringify({ url: link }), 200);
+      } catch (e) {
+        return cors(JSON.stringify({ error: 'Invalid plan JSON: ' + e.message }), 400);
+      }
+    }
+
     if (request.method !== 'POST')    return cors(JSON.stringify({ error: 'Method not allowed' }), 405);
 
     try {
@@ -164,4 +179,13 @@ function cors(body, status) {
       'Access-Control-Allow-Headers': 'Content-Type',
     },
   });
+}
+
+// UTF-8-safe base64url (no padding) — matches Python's
+// base64.urlsafe_b64encode(...).rstrip('=') and the form's b64urlToStr decoder.
+function toBase64Url(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
