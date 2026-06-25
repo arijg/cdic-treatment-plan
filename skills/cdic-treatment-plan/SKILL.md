@@ -34,7 +34,9 @@ gets back one tappable link.
 3. **Map to canonical values** using `reference.md`:
    - Treatment names → exact catalog spelling (you may pass the name loosely;
      the form matches ignoring case/spacing, but prefer the catalog spelling).
-     If a treatment is **not** in the catalog, include an explicit `price`.
+     **Omit `price` for catalog treatments** — the form fills in the current
+     price itself, so prices never go stale. Only include `price` for a *custom*
+     treatment that isn't in the catalog (or a deliberate one-off override).
    - Teeth → US universal numbers (see reference). A whole arch → `"teeth":
      "Full Arch"` **plus** `"arch": "upper"` or `"lower"`.
    - Discounts → preset names where possible. Percentage discounts need `pct`.
@@ -82,6 +84,7 @@ gets back one tappable link.
   mention it auto-adds so the total isn't a surprise.
 - **Patient data is PHI.** Only build plans the user explicitly asks for. Don't
   store, log, or reuse patient details beyond producing the requested link.
-- **Mind the price list.** Prices live in `reference.md`. If the user says a
-  price has changed, use the price they give for that line (pass it as
-  `price`) and flag that the catalog may be out of date.
+- **Prices come from the form.** You don't set catalog prices — the form fills
+  the current price for each catalog treatment automatically. If the user
+  insists a specific line should cost a different amount, pass that as `price`
+  for that procedure (a deliberate override) and call it out in your summary.

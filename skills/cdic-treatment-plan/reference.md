@@ -43,9 +43,15 @@ All fields are optional. Omitted dropdowns fall back to the form's defaults.
 - Listing teeth from both arches in one procedure is fine — the form splits it
   into an upper line and a lower line automatically.
 
-## Treatment catalog (exact names + default unit price)
+## Treatment catalog (exact names)
 
-| Treatment | Price |
+> **Prices below are illustrative.** The form fills in the live unit price for
+> each catalog treatment at load time, so you should **omit `price`** for any
+> treatment in this list — only include `price` for a *custom* treatment that
+> isn't here. `build_link.py` reads the authoritative prices straight from
+> `treatment-plan.html`.
+
+| Treatment | Price (illustrative) |
 |---|---|
 | Surgical Extractions | $895 |
 | Bone Graft | $785 |

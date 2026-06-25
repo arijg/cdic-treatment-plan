@@ -1,68 +1,116 @@
 #!/usr/bin/env python3
 """Build a prefilled CDIC Treatment Plan link from a plan JSON.
 
-The treatment-plan page reads ?plan=<base64url-encoded JSON> on load and
-fills every field. This script takes the plan JSON, validates it lightly
-against the catalog, base64url-encodes it, and prints the full URL.
+The treatment-plan page reads ?plan=<base64url-encoded JSON> on load and fills
+every field. This script takes the plan JSON, base64url-encodes it, and prints
+the full URL.
+
+The treatment catalog is the SINGLE SOURCE OF TRUTH and lives in
+treatment-plan.html (the `const TREATMENTS = [...]` block). This script does NOT
+carry its own price list:
+  * The form itself fills in each catalog price at load time, so the link never
+    needs to embed catalog prices — only custom (non-catalog) treatments need an
+    explicit `price`.
+  * For VALIDATION (warning about unknown treatment names), this script reads
+    that same TREATMENTS block straight from the HTML, so prices/names can never
+    drift out of sync. Resolution order:
+        1. --html <path>            (explicit local file)
+        2. $CDIC_TP_HTML            (env var)
+        3. ./treatment-plan.html    (bundled next to this script, if present)
+        4. ../../treatment-plan.html (repo layout)
+        5. live URL (GitHub Pages)  (keeps the in-app skill in sync)
+    If none can be read, the link is still built — name validation is just
+    skipped with a notice (the form will still apply the correct prices).
 
 Usage:
     python build_link.py '<json string>'
+    python build_link.py --html /path/to/treatment-plan.html '<json>'
     echo '<json>' | python build_link.py
 
-Output: the full https URL on stdout (plus any warnings on stderr).
+Output: the full https URL on stdout (any WARNINGs/notices go to stderr).
 """
+import os
+import re
 import sys
 import json
 import base64
+import urllib.request
 
 BASE_URL = "https://arijg.github.io/cdic-treatment-plan/treatment-plan.html"
-
-# Canonical catalog — keep in sync with TREATMENTS in treatment-plan.html.
-TREATMENTS = {
-    "surgical extractions": 895,
-    "bone graft": 785,
-    "ozone therapy post extraction": 285,
-    "surgical temporary per unit": 550,
-    "internal sinus lift with prf & prp": 2500,
-    "titanium implant abutment": 785,
-    "prf & prp": 685,
-    "zirconia abutment customization": 785,
-    "zirconia/metal free/ceramic crowns": 2895,
-    "titanium implant abutment & crown": 3895,
-    "section crown": 485,
-    "zirconia / metal free / ceramic implant": 3000,
-    "zirconia/ceramic implant post & crown": 5895,
-    "internal sinus lift": 1250,
-    "fully guided implant surgical stent": 250,
-    "vitamin c": 240,
-    "surgical implant extraction": 785,
-    "prosthetic temporary per unit": 555,
-    "laser-assisted bacterial reduction": 375,
-    "full arch reconstruction": 18900,
-}
+LIVE_HTML_URL = BASE_URL  # the form page also contains the catalog
 
 NON_PCT_PRESETS = {"Free Extractions", "Courtesy X-Rays"}
 FIXED_PRICE_PRESETS = {"Upper Arch $18,900 Special", "Lower Arch $18,900 Special"}
 
 
 def _norm(s):
+    """Lowercase + strip all whitespace — matches the form's name matching."""
     return "".join(str(s).lower().split())
 
 
-def validate(data):
+# ── Catalog: parsed from treatment-plan.html (single source of truth) ──────────
+def _read_html(explicit=None):
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates = [
+        explicit,
+        os.environ.get("CDIC_TP_HTML"),
+        os.path.join(here, "treatment-plan.html"),
+        os.path.join(here, "..", "..", "treatment-plan.html"),
+    ]
+    for path in candidates:
+        if path and os.path.isfile(path):
+            with open(path, encoding="utf-8") as f:
+                return f.read(), path
+    try:
+        with urllib.request.urlopen(LIVE_HTML_URL, timeout=10) as resp:
+            return resp.read().decode("utf-8"), LIVE_HTML_URL
+    except Exception as e:  # offline / sandboxed — caller degrades gracefully
+        return None, f"unavailable ({e})"
+
+
+def load_catalog(explicit=None):
+    """Return ({canonical name: price}, source) parsed from the HTML, or (None, source)."""
+    html, src = _read_html(explicit)
+    if not html:
+        return None, src
+    block = re.search(r"const\s+TREATMENTS\s*=\s*\[(.*?)\]\s*;", html, re.S)
+    if not block:
+        return None, f"{src} (TREATMENTS block not found)"
+    catalog = {
+        name: int(price)
+        for name, price in re.findall(
+            r'name:\s*"([^"]*)"\s*,\s*price:\s*(\d+)', block.group(1)
+        )
+    }
+    return (catalog or None), src
+
+
+def validate(data, catalog, source):
     """Emit non-fatal warnings to stderr so the assistant can fix the plan."""
     warn = lambda m: print(f"WARNING: {m}", file=sys.stderr)
-    norm_catalog = {_norm(k): k for k in TREATMENTS}
+
+    if catalog is None:
+        print(f"NOTE: could not load the treatment catalog from {source} — "
+              f"skipping treatment-name validation. The form will still apply "
+              f"current prices for catalog items at load time.", file=sys.stderr)
+        norm_catalog = {}
+    else:
+        norm_catalog = {_norm(name): (name, price) for name, price in catalog.items()}
 
     for pr in data.get("procedures", []):
         name = pr.get("name", "")
-        if _norm(name) not in norm_catalog and pr.get("price") is None:
+        hit = norm_catalog.get(_norm(name))
+        if catalog is not None and hit is None and pr.get("price") is None:
             warn(f'Treatment "{name}" is not in the catalog and has no price — '
-                 f"add a price or fix the name.")
+                 f"fix the name to match the catalog, or add an explicit price.")
+        elif hit is not None and pr.get("price") is not None and pr["price"] != hit[1]:
+            warn(f'Treatment "{name}" has price {pr["price"]} but the catalog '
+                 f"says {hit[1]}. Omit price to always use the live catalog price, "
+                 f"or keep it only if this is a deliberate override.")
         teeth = str(pr.get("teeth", "")).strip().lower()
         if teeth in ("full arch", "") and not pr.get("arch"):
             warn(f'Procedure "{name}" uses Full Arch but no "arch" '
-                 f'(upper/lower) was given — it will be skipped by the form.')
+                 f'(upper/lower) was given — the form will skip it.')
 
     for ds in data.get("discounts", []):
         name = ds.get("name", "")
@@ -71,10 +119,27 @@ def validate(data):
             warn(f'Discount "{name}" is percentage-based but has no "pct".')
 
 
+def parse_args(argv):
+    html_path, positional = None, []
+    i = 0
+    while i < len(argv):
+        a = argv[i]
+        if a == "--html":
+            html_path = argv[i + 1]; i += 2; continue
+        if a.startswith("--html="):
+            html_path = a.split("=", 1)[1]; i += 1; continue
+        positional.append(a); i += 1
+    return html_path, positional
+
+
 def main():
-    raw = sys.argv[1] if len(sys.argv) > 1 else sys.stdin.read()
+    html_path, positional = parse_args(sys.argv[1:])
+    raw = positional[0] if positional else sys.stdin.read()
     data = json.loads(raw)  # raises on invalid JSON — surfaces the problem
-    validate(data)
+
+    catalog, source = load_catalog(html_path)
+    validate(data, catalog, source)
+
     compact = json.dumps(data, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
     token = base64.urlsafe_b64encode(compact).decode("ascii").rstrip("=")
     print(f"{BASE_URL}?plan={token}")

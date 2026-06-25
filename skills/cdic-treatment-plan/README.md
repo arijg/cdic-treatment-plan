@@ -25,7 +25,8 @@ ones (mixed-arch splitting, laser auto-pairing, totals, surgical-temp check).
 - `reference.md` — canonical treatments/prices, doctors, coordinators,
   locations, discount presets, tooth numbering, JSON schema, worked example.
 - `build_link.py` — encodes a plan JSON into the final URL (and warns about
-  unknown treatments / malformed full-arch entries).
+  unknown treatments / malformed full-arch entries). Reads the treatment
+  catalog straight from `treatment-plan.html`, so prices never drift.
 
 ## Install in the Claude app
 
@@ -46,10 +47,21 @@ discount 10 percent."* Claude replies with a summary and the link.
 
 ## Keep in sync
 
-`reference.md` and `build_link.py` both hard-code the treatment prices and the
-doctor/coordinator/location/discount lists. If these change in
-`treatment-plan.html`, update them here too (the `TREATMENTS` dict in
-`build_link.py` and the tables in `reference.md`).
+Prices are **not** duplicated anymore. `treatment-plan.html` is the single
+source of truth:
+
+- The form fills in each catalog price at load time, so a link only needs an
+  explicit `price` for a *custom* (non-catalog) treatment.
+- `build_link.py` reads the `TREATMENTS` block straight from
+  `treatment-plan.html` for its name validation (local file in the repo; the
+  live GitHub Pages URL when running inside the Claude app). If it can't reach
+  the HTML it still builds the link and just skips name validation.
+
+What still lives here for the assistant's convenience: `reference.md` lists the
+treatment **names**, discount presets, doctors/coordinators/locations, and tooth
+numbering so Claude can map speech to canonical values. Prices shown there are
+illustrative only — the form/`build_link.py` are authoritative. Update
+`reference.md` if names or lists change in the HTML.
 
 ## Deployment note
 
