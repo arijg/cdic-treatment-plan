@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/tp_prefill_reminder.py\"",
+            "statusMessage": "Checking treatment-plan voice-prefill sync"
+          }
+        ]
+      }
+    ]
+  }
+}
