@@ -2113,6 +2113,154 @@ function renderTreatmentPlan() {
   const dateStamp = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }).replace(/\//g, '-');
   document.title = `Treatment Plan - ${patientName} ${dateStamp}`;
 }
+
+// ══════════════════════════════════════════════════════════════════════
+//  Prefill from URL  —  ?plan=<base64url-encoded JSON>
+//  Used by the "CDIC Treatment Plan (voice)" Claude Skill. Populates every
+//  field by driving the SAME entry paths a human uses (addProcedure /
+//  addDiscount), so mixed-arch splitting, laser auto-pairing, unit/section
+//  totals and the surgical-temporary check all behave identically. Then it
+//  leaves the user on Step 1 to review before sending to GHL — nothing is
+//  submitted automatically.
+//  Schema (all fields optional):
+//    {
+//      "patient":   { "firstName","lastName","phone","email","dob" },
+//      "doctor","coordinator","location",      // fuzzy-matched to dropdowns
+//      "procedures":[ { "name","teeth","arch"?,"price"? } ],
+//      "discounts": [ { "name","pct"? } ],
+//      "discountDate": "YYYY-MM-DD"
+//    }
+//  teeth: comma list of US universal numbers ("14, 15") or "Full Arch"
+//  (pair "Full Arch" with "arch":"upper"|"lower"). price is optional for
+//  catalog treatments (resolved from TREATMENTS); required for custom ones.
+// ══════════════════════════════════════════════════════════════════════
+function b64urlToStr(s) {
+  s = String(s).replace(/-/g, '+').replace(/_/g, '/');
+  while (s.length % 4) s += '=';
+  return decodeURIComponent(escape(atob(s)));
+}
+
+function setSelectFuzzy(id, wanted) {
+  if (!wanted) return; // not specified → keep the form's default option
+  const sel = document.getElementById(id);
+  if (!sel) return;
+  const w = String(wanted).toLowerCase().trim();
+  const opt = [...sel.options].find(o => o.value.toLowerCase() === w || o.text.toLowerCase() === w)
+    || [...sel.options].find(o => o.value && (
+         o.value.toLowerCase().includes(w) || o.text.toLowerCase().includes(w) || w.includes(o.text.toLowerCase())));
+  if (opt) sel.value = opt.value;
+  else console.warn('Prefill: no', id, 'option matched', wanted);
+}
+
+// Match a spoken/typed treatment name to the canonical catalog entry,
+// ignoring case and all whitespace (handles "Zirconia / Metal Free ..."
+// vs "Zirconia/Metal Free...").
+function findTreatment(name) {
+  const norm = s => String(s).toLowerCase().replace(/\s+/g, '');
+  const n = norm(name);
+  return TREATMENTS.find(t => norm(t.name) === n) || null;
+}
+
+function applyPrefill(d) {
+  const p = d.patient || {};
+  if (p.firstName) document.getElementById('patientFirstName').value = p.firstName;
+  if (p.lastName)  document.getElementById('patientLastName').value  = p.lastName;
+  if (p.email)     document.getElementById('patientEmail').value     = p.email;
+  if (p.phone) {
+    const el = document.getElementById('patientPhone');
+    el.value = p.phone;
+    el.dispatchEvent(new Event('input')); // reuse the (XXX) XXX-XXXX formatter
+  }
+  if (p.dob) { // accept YYYY-MM-DD or MM/DD/YYYY
+    const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(p.dob);
+    const us  = /^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/.exec(p.dob);
+    let mm, dd, yyyy;
+    if (iso) { yyyy = iso[1]; mm = iso[2].padStart(2,'0'); dd = iso[3].padStart(2,'0'); }
+    else if (us) { mm = us[1].padStart(2,'0'); dd = us[2].padStart(2,'0'); yyyy = us[3]; }
+    if (yyyy) {
+      document.getElementById('dobMM').value = mm;
+      document.getElementById('dobDD').value = dd;
+      document.getElementById('dobYYYY').value = yyyy;
+      document.getElementById('patientDOB').value = `${yyyy}-${mm}-${dd}`;
+    }
+  }
+
+  setSelectFuzzy('doctor',      d.doctor);
+  setSelectFuzzy('coordinator', d.coordinator);
+  setSelectFuzzy('location',    d.location);
+
+  // ── Procedures ──────────────────────────────────────────────────────
+  (d.procedures || []).forEach(pr => {
+    if (!pr || !pr.name) return;
+    const match = findTreatment(pr.name);
+    const name  = match ? match.name : String(pr.name);
+    const price = (pr.price != null) ? pr.price : (match ? match.price : null);
+    if (price == null) { console.warn('Prefill: no price for custom treatment', pr.name, '— skipped'); return; }
+
+    document.getElementById('txInput').value    = name;
+    document.getElementById('priceInput').value = price;
+
+    const teeth = pr.teeth ? String(pr.teeth).trim() : '';
+    const archRaw = (pr.arch || '').toLowerCase();
+    const isFull = /^full\s*arch$/i.test(teeth) || archRaw === 'upper' || archRaw === 'lower';
+
+    if (isFull) {
+      const arch = archRaw === 'lower' ? 'lower' : archRaw === 'upper' ? 'upper' : null;
+      if (!arch) { console.warn('Prefill: "Full Arch" needs arch upper/lower for', name, '— skipped'); return; }
+      fullArchSel = arch;
+      document.getElementById('teethInput').value = 'Full Arch';
+    } else {
+      fullArchSel = null;
+      document.getElementById('teethInput').value = teeth;
+      if (!parseTeeth(teeth).length) { console.warn('Prefill: no valid teeth for', name, '— skipped'); return; }
+    }
+    addProcedure(true); // true = skip the duplicate-confirm modal
+  });
+
+  // ── Discounts ───────────────────────────────────────────────────────
+  (d.discounts || []).forEach(ds => {
+    if (!ds || !ds.name) return;
+    document.getElementById('discountName').value = ds.name;
+    const pctEl = document.getElementById('discountPct');
+    pctEl.disabled = false;
+    pctEl.value = (ds.pct != null) ? ds.pct : '';
+    addDiscount(); // applies preset logic (fixed price / free extractions / x-rays / pct)
+  });
+
+  if (d.discountDate) document.getElementById('discountDate').value = d.discountDate;
+
+  goStep(1); // land on Step 1 for review
+  showPrefillBanner();
+}
+
+function showPrefillBanner() {
+  if (document.getElementById('prefillBanner')) return;
+  const b = document.createElement('div');
+  b.id = 'prefillBanner';
+  b.className = 'no-print';
+  b.style.cssText = 'position:sticky;top:0;z-index:50;background:#0b7a3b;color:#fff;' +
+    'padding:10px 16px;font-size:14px;text-align:center;font-weight:600;cursor:pointer;' +
+    'box-shadow:0 1px 4px rgba(0,0,0,.2)';
+  b.innerHTML = '🎤 Prefilled from voice — review each step, then “Send to GHL.” ' +
+    '<span style="opacity:.85;font-weight:400">(tap to dismiss)</span>';
+  b.onclick = () => b.remove();
+  document.body.prepend(b);
+}
+
+(function initPrefill() {
+  function run() {
+    const raw = new URLSearchParams(location.search).get('plan');
+    if (!raw) return;
+    let data;
+    try {
+      const json = raw.trim().startsWith('{') ? decodeURIComponent(raw) : b64urlToStr(raw);
+      data = JSON.parse(json);
+    } catch (e) { console.error('Prefill: could not decode ?plan= payload', e); return; }
+    try { applyPrefill(data); } catch (e) { console.error('Prefill: failed to apply', e); }
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
+  else run();
+})();
 </script>
 </body>
 </html>
