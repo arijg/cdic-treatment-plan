@@ -43,8 +43,10 @@ that — it's for a different platform. Use the Action.)
    - Teeth → US universal numbers, e.g. `"14, 15"`. A whole arch → `"teeth":
      "Full Arch"` PLUS `"arch": "upper"` or `"lower"`.
    - Discounts → preset names where possible. Percentage discounts need `pct`;
-     the fixed presets (Free Extractions, Courtesy X-Rays, the two "$18,900
-     Special"s) take no `pct`.
+     flat dollar discounts need `amount` (e.g. "$500 off" → `"amount": 500`).
+     The fixed presets (Free Extractions, Courtesy X-Rays, the two "$18,900
+     Special"s) take neither. Dollar discounts always come off before
+     percentages — percentages apply to the remaining balance.
 
 4. **Ask only about real blockers.** Build the link even if optional fields are
    missing. Only ask when something is ambiguous or unsafe to guess — e.g. a

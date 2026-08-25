@@ -27,6 +27,7 @@ All fields are optional. Omitted dropdowns fall back to the form's defaults.
   ],
   "discounts": [
     { "name": "Senior Citizen Discount", "pct": 10 },
+    { "name": "Insurance Credit", "amount": 500 },  // flat $ off
     { "name": "Free Extractions" }
   ],
   "discountDate": "2026-06-30"          // "valid through"; defaults to end of month
@@ -109,8 +110,11 @@ to handle this — just be aware the prompt may appear.
 | The Fall Confidence Special | Percentage off | **Yes** |
 | New Year, New Smile | Percentage off | **Yes** |
 
-A custom percentage discount with any name is fine too — just include `pct`.
-Discounts apply in the order listed.
+A custom discount with any name is fine too — include `pct` for a percentage
+or `amount` for a flat dollar discount (never both).
+Dollar-valued discounts (flat `amount`, Free Extractions, Courtesy X-Rays, the
+arch specials) always come off first; percentage discounts then apply to the
+remaining balance (e.g. $100 case with $10 off + 10% → the 10% is $9).
 
 ## Tooth numbering (US Universal, 1–32)
 

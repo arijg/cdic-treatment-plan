@@ -106,6 +106,13 @@ components:
                 type: number
                 description: Required for percentage discounts. Omit for fixed
                   presets (Free Extractions, Courtesy X-Rays, the $18,900 specials).
+                  Percentages apply to the balance remaining after all
+                  dollar-valued discounts.
+              amount:
+                type: number
+                description: Flat dollars off, for a custom dollar discount
+                  (e.g. "$500 off"). Use pct OR amount, never both. Dollar
+                  discounts always come off before percentage discounts.
         discountDate:
           type: string
           description: "Valid-through date, YYYY-MM-DD. Defaults to end of month."

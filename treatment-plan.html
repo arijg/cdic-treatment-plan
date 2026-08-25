@@ -471,6 +471,14 @@ input[type=text], input[type=tel], input[type=email] {
 .optional-label.open::before { transform: rotate(90deg); }
 .optional-body { display: none; }
 .optional-body.open { display: block; }
+/* Highlight while a procedure is dragged over the Discounts section */
+.optional-section.disc-drop-target {
+  outline: 2px dashed #1d4e99;
+  outline-offset: 4px;
+  border-radius: 8px;
+  background: #eef4ff;
+}
+.optional-section.disc-drop-target .optional-label { color: #1d4e99; }
 
 
 /* ════════════════════════════════════════════
@@ -570,7 +578,7 @@ input[type=text], input[type=tel], input[type=email] {
   gap: 16px;
 }
 .tp-summary { display: flex; justify-content: flex-end; flex-shrink: 0; }
-.tp-summary-inner { font-size: 11.5px; min-width: 340px; }
+.tp-summary-inner { font-size: 11.5px; min-width: 340px; max-width: 400px; }
 .tp-sum-row {
   display: flex;
   justify-content: space-between;
@@ -865,8 +873,11 @@ input[type=text], input[type=tel], input[type=email] {
         <div class="subtotal-rows" id="subtotalRows"></div>
       </div>
 
-      <!-- Optional discounts -->
-      <div class="optional-section">
+      <!-- Optional discounts (also a drop target: drag a procedure here to comp it) -->
+      <div class="optional-section" id="discountSection"
+           ondragover="onProcDragOverDiscounts(event)"
+           ondragleave="onProcDragLeaveDiscounts(event)"
+           ondrop="onProcDropOnDiscounts(event)">
         <div class="optional-label" onclick="toggleOptional(this)">Discounts (Optional)</div>
         <div class="optional-body">
           <div class="discount-input-row">
@@ -877,8 +888,14 @@ input[type=text], input[type=tel], input[type=email] {
               <div class="ac-list" id="acDiscountList"></div>
             </div>
             <div class="form-group">
-              <label>Discount %</label>
-              <input type="number" id="discountPct" placeholder="e.g. 10" min="0" max="100" step="1" value="5">
+              <label>Discount</label>
+              <div style="display:flex; gap:6px;">
+                <select id="discountType" onchange="onDiscountTypeChange()" style="flex:0 0 58px; padding-left:10px; padding-right:10px;">
+                  <option value="pct">%</option>
+                  <option value="amt">$</option>
+                </select>
+                <input type="number" id="discountPct" placeholder="e.g. 10" min="0" max="100" step="1" value="5" style="flex:1; min-width:0;">
+              </div>
             </div>
             <button class="btn btn-primary" onclick="addDiscount()" style="margin-bottom:1px">+ Add</button>
           </div>
@@ -1001,39 +1018,57 @@ const FIXED_PRICE_PRESETS = {
 };
 const XRAY_SUBTOTAL = 250;
 
-// Returns an array of dollar amounts, one per discount, respecting order.
+// Returns an array of dollar amounts, one per discount.
 // ctx may be a plain number (legacy: whole-case total) or an object
 // { total, upperTotal, lowerTotal, xray } so arch-scoped specials can be computed.
-//   • percentage discounts apply to `total`
+//   • dollar-valued discounts (flat $ off, Free Extractions, arch specials)
+//     ALWAYS come off first, regardless of list order
+//   • percentage discounts then apply to the remaining balance
+//     (e.g. $100 case, $10 off + 10% → the 10% is $9, not $10)
 //   • arch fixed-price specials bring that arch's procedures down to fixedPrice.
 //     The single shared X-ray is split EVENLY across all arch specials, so two
 //     arch specials each absorb half the X-ray — both lines show the same amount
 //     and the total is (fixedPrice × 2), not short by the X-ray.
-//   • legacy whole-case fixed-price (no arch) brings the after-percent total down to fixedPrice
+//   • legacy whole-case fixed-price (no arch) brings the after-everything total down to fixedPrice
 //   • "Free Extractions" (extractionsFree) deducts the full cost of all extraction lines
 function computeDiscountAmounts(ctx, discountList) {
   if (typeof ctx === 'number') ctx = { total: ctx, upperTotal: 0, lowerTotal: 0, xray: 0, extractionsTotal: 0 };
   const { total, upperTotal = 0, lowerTotal = 0, xray = XRAY_SUBTOTAL, extractionsTotal = 0 } = ctx;
-
-  const pctTotal = discountList
-    .filter(d => d.pct !== undefined)
-    .reduce((s, d) => s + total * (d.pct / 100), 0);
-  const afterPct = total - pctTotal;
 
   const archSpecialCount = discountList.filter(
     d => d.fixedPrice !== undefined && (d.arch === 'upper' || d.arch === 'lower')
   ).length;
   const xrayPerArch = archSpecialCount > 0 ? xray / archSpecialCount : 0;
 
-  return discountList.map(d => {
-    if (d.extractionsFree)         return Math.max(0, extractionsTotal);              // free extractions
-    if (d.fixedAmount !== undefined) return Math.max(0, Math.min(d.fixedAmount, total)); // flat $ off (e.g. courtesy X-rays)
-    if (d.pct !== undefined)       return total * (d.pct / 100);                      // percentage
-    if (d.arch === 'upper' || d.arch === 'lower') {
+  // Dollar value of a discount, or null if it isn't dollar-valued
+  // (percentage / legacy whole-case fixed price).
+  const dollarAmount = d => {
+    if (d.extractionsFree)           return Math.max(0, extractionsTotal);              // free extractions
+    if (d.procRef !== undefined)     return procedures.includes(d.procRef) ? Math.max(0, d.procRef.total) : 0; // courtesy procedure (tracks the live line total)
+    if (d.fixedAmount !== undefined) return Math.max(0, Math.min(d.fixedAmount, total)); // flat $ off
+    if (d.fixedPrice !== undefined && (d.arch === 'upper' || d.arch === 'lower')) {
       const archTotal = d.arch === 'upper' ? upperTotal : lowerTotal;
       return Math.max(0, (archTotal + xrayPerArch) - d.fixedPrice);
     }
-    return Math.max(0, afterPct - d.fixedPrice); // legacy whole-case
+    return null;
+  };
+
+  const dollarTotal = discountList.reduce((s, d) => {
+    const amt = dollarAmount(d);
+    return s + (amt === null ? 0 : amt);
+  }, 0);
+  const pctBase = Math.max(0, total - dollarTotal);
+
+  const pctTotal = discountList
+    .filter(d => d.pct !== undefined)
+    .reduce((s, d) => s + pctBase * (d.pct / 100), 0);
+  const afterAll = pctBase - pctTotal;
+
+  return discountList.map(d => {
+    const amt = dollarAmount(d);
+    if (amt !== null)        return amt;
+    if (d.pct !== undefined) return pctBase * (d.pct / 100); // percentage of the post-dollar balance
+    return Math.max(0, afterAll - d.fixedPrice);             // legacy whole-case
   });
 }
 
@@ -1356,15 +1391,31 @@ function selectDiscount(e, name) {
   e.preventDefault();
   document.getElementById('discountName').value = name;
   document.getElementById('acDiscountList').style.display = 'none';
-  const pctEl = document.getElementById('discountPct');
+  const pctEl  = document.getElementById('discountPct');
+  const typeEl = document.getElementById('discountType');
   if (FIXED_PRICE_PRESETS[name] !== undefined || NON_PCT_PRESETS.has(name)) {
     pctEl.value = '';
     pctEl.placeholder = 'N/A';
     pctEl.disabled = true;
+    typeEl.disabled = true;
   } else {
     pctEl.disabled = false;
-    pctEl.placeholder = 'e.g. 10';
+    typeEl.disabled = false;
+    onDiscountTypeChange();
     pctEl.focus();
+  }
+}
+
+// Keep the value input's constraints in sync with the $ / % toggle.
+function onDiscountTypeChange() {
+  const typeEl = document.getElementById('discountType');
+  const pctEl  = document.getElementById('discountPct');
+  if (typeEl.value === 'amt') {
+    pctEl.removeAttribute('max');
+    pctEl.placeholder = 'e.g. 500';
+  } else {
+    pctEl.max = 100;
+    pctEl.placeholder = 'e.g. 10';
   }
 }
 
@@ -1381,13 +1432,22 @@ function addDiscount() {
   } else if (name === 'Courtesy X-Rays') {
     discounts.push({ name, fixedAmount: XRAY_SUBTOTAL });
   } else {
-    const pct = parseFloat(pctEl.value);
-    if (!pct || pct <= 0) { alert('Please enter a valid discount percentage.'); return; }
-    discounts.push({ name, pct });
+    const isDollar = document.getElementById('discountType').value === 'amt';
+    const val = parseFloat(pctEl.value);
+    if (!val || val <= 0) {
+      alert(isDollar ? 'Please enter a valid discount amount.' : 'Please enter a valid discount percentage.');
+      return;
+    }
+    if (isDollar) discounts.push({ name, fixedAmount: val });
+    else          discounts.push({ name, pct: val });
   }
   document.getElementById('discountName').value = '';
+  const typeEl = document.getElementById('discountType');
+  typeEl.value = 'pct';
+  typeEl.disabled = false;
   pctEl.value = '5';
   pctEl.placeholder = 'e.g. 10';
+  pctEl.max = 100;
   pctEl.disabled = false;
   renderDiscountList();
   renderSubtotal();
@@ -1410,11 +1470,12 @@ function renderDiscountList() {
   const discCtx = { total: caseTotal + XRAY_SUBTOTAL, upperTotal, lowerTotal, xray: XRAY_SUBTOTAL, extractionsTotal: extractionsSubtotal() };
   wrap.innerHTML = `
     <div class="discount-item-header">
-      <span></span><span>Name</span><span>%</span><span>Amount</span><span></span>
+      <span></span><span>Name</span><span>Value</span><span>Amount</span><span></span>
     </div>
     ${computeDiscountAmounts(discCtx, discounts).map((amt, i) => {
       const d     = discounts[i];
       const label = d.extractionsFree   ? 'All extractions'
+                  : d.procRef !== undefined ? 'Full fee'
                   : d.fixedAmount !== undefined ? `$${d.fixedAmount.toLocaleString()} off`
                   : d.fixedPrice !== undefined ? `$${d.fixedPrice.toLocaleString()} target`
                   : `${d.pct}%`;
@@ -1505,7 +1566,8 @@ function renderSubtotal() {
 
 // ── Remove procedure ───────────────────────────────────────────────────
 function removeProcedure(i) {
-  procedures.splice(i, 1);
+  const removed = procedures.splice(i, 1)[0];
+  discounts = discounts.filter(d => d.procRef !== removed); // drop its courtesy discount too
   renderProcList();
   renderSubtotal();
   renderDiscountList();   // keep dynamic discounts (e.g. Free Extractions) in sync
@@ -1548,7 +1610,36 @@ function onDrop(e, i) {
 function onDragEnd(e) {
   e.target.classList.remove('dragging');
   document.querySelectorAll('.proc-item').forEach(el => el.classList.remove('drag-over'));
+  document.getElementById('discountSection').classList.remove('disc-drop-target');
   dragSrcIdx = null;
+}
+
+// ── Drag a procedure onto the Discounts section → courtesy discount ──
+// Comps the line: the procedure stays on the plan, and a "Courtesy <name>"
+// dollar discount deducts its full fee (tracking later price edits).
+function onProcDragOverDiscounts(e) {
+  if (dragSrcIdx === null) return; // only procedure drags; discount reordering handles itself
+  e.preventDefault();
+  document.getElementById('discountSection').classList.add('disc-drop-target');
+}
+function onProcDragLeaveDiscounts(e) {
+  const sec = document.getElementById('discountSection');
+  if (!sec.contains(e.relatedTarget)) sec.classList.remove('disc-drop-target');
+}
+function onProcDropOnDiscounts(e) {
+  if (dragSrcIdx === null) return;
+  e.preventDefault();
+  const sec = document.getElementById('discountSection');
+  sec.classList.remove('disc-drop-target');
+  const p = procedures[dragSrcIdx];
+  dragSrcIdx = null;
+  if (!p) return;
+  if (discounts.some(d => d.procRef === p)) { alert(`"${p.name}" already has a courtesy discount.`); return; }
+  discounts.push({ name: `Courtesy ${p.name}`, procRef: p });
+  const label = sec.querySelector('.optional-label');
+  if (!label.classList.contains('open')) toggleOptional(label); // reveal the new courtesy line
+  renderDiscountList();
+  renderSubtotal();
 }
 
 // ── Render procedures list ─────────────────────────────────────────────
@@ -2127,7 +2218,7 @@ function renderTreatmentPlan() {
 //      "patient":   { "firstName","lastName","phone","email","dob" },
 //      "doctor","coordinator","location",      // fuzzy-matched to dropdowns
 //      "procedures":[ { "name","teeth","arch"?,"price"? } ],
-//      "discounts": [ { "name","pct"? } ],
+//      "discounts": [ { "name","pct"?,"amount"? } ],   // pct = % of post-dollar balance; amount = flat $ off
 //      "discountDate": "YYYY-MM-DD"
 //    }
 //  teeth: comma list of US universal numbers ("14, 15") or "Full Arch"
@@ -2221,10 +2312,18 @@ function applyPrefill(d) {
   (d.discounts || []).forEach(ds => {
     if (!ds || !ds.name) return;
     document.getElementById('discountName').value = ds.name;
-    const pctEl = document.getElementById('discountPct');
-    pctEl.disabled = false;
-    pctEl.value = (ds.pct != null) ? ds.pct : '';
-    addDiscount(); // applies preset logic (fixed price / free extractions / x-rays / pct)
+    const typeEl = document.getElementById('discountType');
+    const pctEl  = document.getElementById('discountPct');
+    typeEl.disabled = false;
+    pctEl.disabled  = false;
+    if (ds.amount != null && ds.pct == null) {  // flat dollar discount
+      typeEl.value = 'amt';
+      pctEl.value  = ds.amount;
+    } else {
+      typeEl.value = 'pct';
+      pctEl.value  = (ds.pct != null) ? ds.pct : '';
+    }
+    addDiscount(); // applies preset logic (fixed price / free extractions / x-rays / $ / pct)
   });
 
   if (d.discountDate) document.getElementById('discountDate').value = d.discountDate;

@@ -39,9 +39,11 @@ gets back one tappable link.
      treatment that isn't in the catalog (or a deliberate one-off override).
    - Teeth → US universal numbers (see reference). A whole arch → `"teeth":
      "Full Arch"` **plus** `"arch": "upper"` or `"lower"`.
-   - Discounts → preset names where possible. Percentage discounts need `pct`.
+   - Discounts → preset names where possible. Percentage discounts need `pct`;
+     flat dollar discounts need `amount` (e.g. "$500 off" → `"amount": 500`).
      The fixed presets ("Free Extractions", "Courtesy X-Rays", the two "$18,900
-     Special"s) take no `pct`.
+     Special"s) take neither. Dollar discounts always come off before
+     percentages — percentages apply to the remaining balance.
 
 4. **Ask only about true blockers.** Build the link even if optional fields are
    missing. Only ask the user when something is genuinely ambiguous or unsafe

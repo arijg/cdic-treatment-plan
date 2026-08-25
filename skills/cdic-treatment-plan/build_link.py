@@ -122,8 +122,12 @@ def validate(data, catalog, source):
     for ds in data.get("discounts", []):
         name = ds.get("name", "")
         is_preset_fixed = name in FIXED_PRICE_PRESETS or name in NON_PCT_PRESETS
-        if not is_preset_fixed and ds.get("pct") is None:
-            warn(f'Discount "{name}" is percentage-based but has no "pct".')
+        if not is_preset_fixed and ds.get("pct") is None and ds.get("amount") is None:
+            warn(f'Discount "{name}" has neither "pct" (percentage) nor '
+                 f'"amount" (flat dollars off).')
+        elif ds.get("pct") is not None and ds.get("amount") is not None:
+            warn(f'Discount "{name}" has both "pct" and "amount" — use one; '
+                 f'the form will treat it as a percentage.')
 
 
 def parse_args(argv):
