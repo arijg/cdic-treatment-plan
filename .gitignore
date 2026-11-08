@@ -1,2 +1,5 @@
 .claude/settings.local.json
 cdic-treatment-plan.zip
+
+# Local secrets (staff PIN for the Treatment Plan Log). Never commit.
+.env

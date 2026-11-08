@@ -132,6 +132,15 @@ input[type=text], input[type=tel], input[type=email] {
 .btn-print     { background: #1d4e99; color: #fff; }
 .btn-ghl       { background: #117077; color: #fff; }
 
+/* Sheet-log status label under the Step 3 buttons (hidden on paper) */
+.log-status-row { text-align: right; }
+.log-status {
+  display: inline-block; margin: -4px 0 12px; padding: 5px 11px; border-radius: 999px;
+  font-size: 12.5px; font-weight: 600; background: #eef2f7; color: #445; cursor: pointer;
+}
+.log-status.ok   { background: #e6f4ec; color: #1a7a4a; cursor: default; }
+.log-status.warn { background: #fdf0e6; color: #a5510f; }
+
 .actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 24px; }
 
 /* ── Autocomplete ── */
@@ -922,8 +931,9 @@ input[type=text], input[type=tel], input[type=email] {
     <div class="no-print actions" style="margin-bottom:14px">
       <button class="btn btn-secondary" onclick="goStep(2)">← Back</button>
       <button class="btn btn-ghl"       onclick="uploadToGHL(this)">⬆ Send to GHL</button>
-      <button class="btn btn-print"     onclick="window.print()">🖨 Print</button>
+      <button class="btn btn-print"     onclick="printPlan()">🖨 Print</button>
     </div>
+    <div class="no-print log-status-row"><span id="logStatus" class="log-status" style="display:none" role="status" onclick="logPlan({ canPrompt: true })"></span></div>
     <div class="tp-wrap">
       <div class="tp" id="tpOutput"></div>
     </div>
@@ -1991,14 +2001,8 @@ async function uploadToGHL(btn) {
     const dateStamp = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }).replace(/\//g, '-');
     const fileName  = `Treatment Plan - ${firstName} ${lastName} ${dateStamp}.pdf`;
 
-    // Compute treatment totals
-    const upper            = procedures.filter(p => p.section === 'upper');
-    const lower            = procedures.filter(p => p.section === 'lower' || p.section === 'mixed');
-    const upperTotal       = upper.reduce((s, p) => s + p.total, 0);
-    const lowerTotal       = lower.reduce((s, p) => s + p.total, 0);
-    const caseTotal        = upperTotal + lowerTotal + XRAY_SUBTOTAL;
-    const tpDiscountAmts   = computeDiscountAmounts({ total: caseTotal, upperTotal, lowerTotal, xray: XRAY_SUBTOTAL, extractionsTotal: extractionsSubtotal() }, discounts);
-    const totalDiscountAmt = tpDiscountAmts.reduce((s, a) => s + a, 0);
+    // Compute treatment totals (same function as the printed plan and the Sheet log)
+    const { caseTotal, discountTotal: totalDiscountAmt } = planTotals();
 
     // Ceramic treatment plan flag: 1 if any ceramic implant procedure is present, else 0
     const ceramicTreatmentPlan = procedures.some(
@@ -2048,6 +2052,189 @@ async function uploadToGHL(btn) {
   }
 }
 
+// ── Shared plan totals (printed plan, Send to GHL and the Sheet log) ────
+function planTotals() {
+  const upper      = procedures.filter(p => p.section === 'upper');
+  const lower      = procedures.filter(p => p.section === 'lower' || p.section === 'mixed');
+  const upperTotal = upper.reduce((s, p) => s + p.total, 0);
+  const lowerTotal = lower.reduce((s, p) => s + p.total, 0);
+  const xray       = XRAY_SUBTOTAL;
+  const caseTotal  = upperTotal + lowerTotal + xray;
+  const discountAmts  = computeDiscountAmounts({ total: caseTotal, upperTotal, lowerTotal, xray, extractionsTotal: extractionsSubtotal() }, discounts);
+  const discountTotal = discountAmts.reduce((s, a) => s + a, 0);
+  return { upper, lower, upperTotal, lowerTotal, xray, caseTotal, discountAmts, discountTotal, net: caseTotal - discountTotal };
+}
+
+// ── Saved-plan link ──────────────────────────────────────────────────
+// An exact snapshot of the form ("exact": true), reopened by the loader at the
+// bottom of this script. Uses #plan= so the payload never reaches the server.
+const PLAN_PAGE_URL = 'https://arijg.github.io/cdic-treatment-plan/treatment-plan.html';
+
+function planPageUrl() {
+  return /^https?:$/.test(location.protocol) ? location.origin + location.pathname : PLAN_PAGE_URL;
+}
+
+// UTF-8-safe base64url (no padding); inverse of b64urlToStr, byte-identical to
+// the worker's toBase64Url and build_link.py.
+function strToB64url(str) {
+  const bytes = new TextEncoder().encode(str);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function serializePlan() {
+  const val = id => (document.getElementById(id).value || '').trim();
+  return {
+    v: 1,
+    exact: true,
+    patient: {
+      firstName: val('patientFirstName'), lastName: val('patientLastName'),
+      phone: val('patientPhone'), email: val('patientEmail'), dob: val('patientDOB'),
+    },
+    doctor: val('doctor'), coordinator: val('coordinator'), location: val('location'),
+    discountDate: val('discountDate'),
+    procedures: procedures.map(p => ({ name: p.name, teeth: p.teeth, price: p.price, units: p.units, section: p.section })),
+    discounts: discounts.map(d => {
+      if (d.procRef !== undefined)     return { name: d.name, courtesyOf: procedures.indexOf(d.procRef) };
+      if (d.fixedPrice !== undefined)  return { name: d.name, fixedPrice: d.fixedPrice, arch: d.arch };
+      if (d.extractionsFree)           return { name: d.name, extractionsFree: true };
+      if (d.fixedAmount !== undefined) return { name: d.name, fixedAmount: d.fixedAmount };
+      return { name: d.name, pct: d.pct };
+    }),
+  };
+}
+
+function buildPlanLink(plan) {
+  return planPageUrl() + '#plan=' + strToB64url(JSON.stringify(plan || serializePlan()));
+}
+
+// ── Log printed plans to the Google Sheet (Apps Script web app) ────────
+// Apps Script web-app URL (ends in /exec). If it is ever blanked out, printing
+// works exactly as before and nothing is logged. Setup: google-apps-script/README.md
+const LOG_URL     = 'https://script.google.com/macros/s/AKfycbwvjIwCFVdmTW2wiBRLyjvc-gCo7I5haPNOjec9tm0f4Y_MPKGjhfQ5IfU3FHEDV4Zjzg/exec';
+const LOG_PIN_KEY = 'cdicTpLogPin';
+const _logState   = new Map(); // planId → 'sending' | 'ok' for this page session
+
+function logConfigured() { return /^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(LOG_URL); }
+function getLogPin()  { try { return localStorage.getItem(LOG_PIN_KEY) || ''; } catch (_) { return ''; } }
+function setLogPin(v) { try { v ? localStorage.setItem(LOG_PIN_KEY, v) : localStorage.removeItem(LOG_PIN_KEY); } catch (_) {} }
+
+// cyrb53: small synchronous string hash, only used to spot duplicate rows.
+function cyrb53(str, seed = 0) {
+  let h1 = 0xdeadbeef ^ seed, h2 = 0x41c6ce57 ^ seed;
+  for (let i = 0, ch; i < str.length; i++) {
+    ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1  = Math.imul(h1 ^ (h1 >>> 16), 2246822507);
+  h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2  = Math.imul(h2 ^ (h2 >>> 16), 2246822507);
+  h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return 4294967296 * (2097151 & h2) + (h1 >>> 0);
+}
+
+function localISODate() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function shortLocation(v) {
+  if (/scarsdale/i.test(v))    return 'Scarsdale';
+  if (/central park/i.test(v)) return 'Central Park';
+  return String(v || '').split('•')[0].trim();
+}
+
+// One Sheet row. Plan ID = hash(plan + today): reprinting the same plan the
+// same day is one row; any change, or a reprint on another day, is a new row.
+function buildLogRow() {
+  const plan = serializePlan();
+  const t    = planTotals();
+  const json = JSON.stringify(plan);
+  return {
+    planId:      'tp' + cyrb53(json + '|' + localISODate()).toString(36),
+    patient:     `${plan.patient.firstName} ${plan.patient.lastName}`.trim(),
+    phone:       plan.patient.phone,
+    caseTotal:   Math.round(t.caseTotal * 100) / 100,
+    discount:    Math.round(t.discountTotal * 100) / 100,
+    coordinator: plan.coordinator,
+    location:    shortLocation(plan.location),
+    link:        planPageUrl() + '#plan=' + strToB64url(json),
+  };
+}
+
+function setLogStatus(state, detail) {
+  const el = document.getElementById('logStatus');
+  if (!el) return;
+  if (!state) { el.style.display = 'none'; return; }
+  const [text, cls] = {
+    sending: ['Logging to Sheet…', ''],
+    ok:      ['✓ Logged to Sheet', 'ok'],
+    dup:     ['✓ Already in Sheet', 'ok'],
+    nopin:   ['Not logged · tap to enter PIN', 'warn'],
+    badpin:  ['PIN rejected · tap to re-enter', 'warn'],
+    locked:  ['Logging paused (too many wrong PINs)', 'warn'],
+    fail:    ['Not logged · tap to retry', 'warn'],
+  }[state];
+  el.textContent   = text;
+  el.className     = 'log-status ' + cls;
+  el.title         = detail || '';
+  el.style.display = '';
+}
+
+// Fire-and-forget: never waits, never throws, never blocks printing.
+function logPlan(opts) {
+  try {
+    opts = opts || {};
+    if (!logConfigured()) return;
+    if (!document.getElementById('step-3').classList.contains('active')) return;
+    if (!procedures.length) return;
+    const row = buildLogRow();
+    if (!row.patient) return;
+
+    const state = _logState.get(row.planId);
+    if (state === 'ok') { setLogStatus('dup'); return; }
+    if (state === 'sending') return;
+
+    let pin = getLogPin();
+    if (!pin && opts.canPrompt) {
+      pin = (window.prompt('Staff PIN for the treatment plan log (asked once on this device):') || '').trim();
+      if (pin) setLogPin(pin);
+    }
+    if (!pin) { setLogStatus('nopin'); return; }
+
+    _logState.set(row.planId, 'sending');
+    setLogStatus('sending');
+    // Sent as text/plain on purpose: a JSON Content-Type would trigger a CORS
+    // preflight, which Apps Script web apps can't answer.
+    fetch(LOG_URL, { method: 'POST', body: JSON.stringify(Object.assign({ pin }, row)) })
+      .then(r => r.json())
+      .then(res => {
+        if (res && res.ok) {
+          _logState.set(row.planId, 'ok');
+          setLogStatus(res.duplicate ? 'dup' : 'ok');
+          return;
+        }
+        _logState.delete(row.planId);
+        const err = res && res.error;
+        if (err === 'bad pin')     { setLogPin(''); setLogStatus('badpin'); }
+        else if (err === 'locked') setLogStatus('locked');
+        else                       setLogStatus('fail', err || 'Unexpected reply from the log');
+      })
+      .catch(e => { _logState.delete(row.planId); setLogStatus('fail', e && e.message); });
+  } catch (e) {
+    console.error('Sheet log skipped:', e);
+  }
+}
+
+function printPlan() {
+  logPlan({ canPrompt: true });
+  window.print();
+}
+// Cmd/Ctrl+P, the browser menu and iOS Share > Print all fire beforeprint.
+window.addEventListener('beforeprint', () => logPlan());
+
 // ── Render treatment plan ──────────────────────────────────────────────
 function renderTreatmentPlan() {
   const patientName  = (document.getElementById('patientFirstName').value + ' ' + document.getElementById('patientLastName').value).trim();
@@ -2058,17 +2245,9 @@ function renderTreatmentPlan() {
 
   const today = new Date().toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 
-  // Partition procedures
-  const upper = procedures.filter(p => p.section === 'upper');
-  const lower = procedures.filter(p => p.section === 'lower' || p.section === 'mixed');
-
-  const upperTotal = upper.reduce((s, p) => s + p.total, 0);
-  const lowerTotal = lower.reduce((s, p) => s + p.total, 0);
-  const xraySubtotal = 250;
-  const caseTotal    = upperTotal + lowerTotal + xraySubtotal;
-  const tpDiscountAmts   = computeDiscountAmounts({ total: caseTotal, upperTotal, lowerTotal, xray: xraySubtotal, extractionsTotal: extractionsSubtotal() }, discounts);
-  const totalDiscountAmt = tpDiscountAmts.reduce((s, a) => s + a, 0);
-  const subtotal         = caseTotal - totalDiscountAmt;
+  // Partition procedures + totals (shared with Send to GHL and the Sheet log)
+  const { upper, lower, upperTotal, lowerTotal, xray: xraySubtotal, caseTotal,
+          discountAmts: tpDiscountAmts, discountTotal: totalDiscountAmt, net: subtotal } = planTotals();
 
   // Build procedure rows
   const procRows = ps => ps.map(p => `
@@ -2203,6 +2382,7 @@ function renderTreatmentPlan() {
   // Set page title so "Save as PDF" defaults to the right filename
   const dateStamp = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }).replace(/\//g, '-');
   document.title = `Treatment Plan - ${patientName} ${dateStamp}`;
+  setLogStatus(null); // new preview → clear the previous plan's log status
 }
 
 // ══════════════════════════════════════════════════════════════════════
@@ -2224,6 +2404,12 @@ function renderTreatmentPlan() {
 //  teeth: comma list of US universal numbers ("14, 15") or "Full Arch"
 //  (pair "Full Arch" with "arch":"upper"|"lower"). price is optional for
 //  catalog treatments (resolved from TREATMENTS); required for custom ones.
+//
+//  Saved plans (the Sheet log's "Plan link") come from serializePlan() as
+//  #plan=… with "exact": true. Those skip the entry logic above and restore
+//  the printed lines as-is: procedures carry units + section, discounts carry
+//  their stored form (pct / fixedAmount / fixedPrice+arch / extractionsFree /
+//  courtesyOf = index of the comped procedure). Then the plan opens on Step 3.
 // ══════════════════════════════════════════════════════════════════════
 function b64urlToStr(s) {
   s = String(s).replace(/-/g, '+').replace(/_/g, '/');
@@ -2252,11 +2438,61 @@ function findTreatment(name) {
   return TREATMENTS.find(t => norm(t.name) === n) || null;
 }
 
+// Link text ends up in innerHTML when the plan renders, so drop < and >.
+function safeStr(v) { return String(v == null ? '' : v).replace(/[<>]/g, '').trim(); }
+
+// Exact restore of a plan saved by serializePlan(): no laser auto-pairing,
+// no mixed-arch splitting, no preset re-resolution. Same lines, same prices.
+function applySnapshot(d) {
+  const num = v => { const n = parseFloat(v); return isFinite(n) ? n : null; };
+  const restored = [];   // index-aligned with d.procedures (null = skipped)
+  procedures = [];
+  (d.procedures || []).forEach(x => {
+    const name  = safeStr(x && x.name);
+    const teeth = safeStr(x && x.teeth);
+    const price = num(x && x.price);
+    if (!name || !teeth || price == null) { restored.push(null); return; }
+    const section = ['upper', 'lower', 'mixed'].includes(x.section) ? x.section : getSection(teeth);
+    const units   = teeth === 'Full Arch' ? 1 : (parseTeeth(teeth).length || num(x.units) || 1);
+    const p = { name, price, teeth, units, section, total: price * units };
+    procedures.push(p);
+    restored.push(p);
+  });
+
+  discounts = [];
+  (d.discounts || []).forEach(x => {
+    const name = safeStr(x && x.name);
+    if (!name) return;
+    if (x.courtesyOf !== undefined) {
+      const p = restored[x.courtesyOf];
+      if (p) discounts.push({ name, procRef: p });
+    } else if (num(x.fixedPrice) != null) {
+      discounts.push(x.arch === 'upper' || x.arch === 'lower'
+        ? { name, fixedPrice: num(x.fixedPrice), arch: x.arch }
+        : { name, fixedPrice: num(x.fixedPrice) });
+    } else if (x.extractionsFree) {
+      discounts.push({ name, extractionsFree: true });
+    } else if (num(x.fixedAmount) != null) {
+      discounts.push({ name, fixedAmount: num(x.fixedAmount) });
+    } else if (num(x.pct) != null) {
+      discounts.push({ name, pct: num(x.pct) });
+    }
+  });
+
+  renderProcList();
+  renderSubtotal();
+  renderDiscountList();
+  if (discounts.length) {
+    const label = document.querySelector('#discountSection .optional-label');
+    if (label && !label.classList.contains('open')) toggleOptional(label);
+  }
+}
+
 function applyPrefill(d) {
   const p = d.patient || {};
-  if (p.firstName) document.getElementById('patientFirstName').value = p.firstName;
-  if (p.lastName)  document.getElementById('patientLastName').value  = p.lastName;
-  if (p.email)     document.getElementById('patientEmail').value     = p.email;
+  if (p.firstName) document.getElementById('patientFirstName').value = safeStr(p.firstName);
+  if (p.lastName)  document.getElementById('patientLastName').value  = safeStr(p.lastName);
+  if (p.email)     document.getElementById('patientEmail').value     = safeStr(p.email);
   if (p.phone) {
     const el = document.getElementById('patientPhone');
     el.value = p.phone;
@@ -2280,11 +2516,20 @@ function applyPrefill(d) {
   setSelectFuzzy('coordinator', d.coordinator);
   setSelectFuzzy('location',    d.location);
 
+  if (d.exact) { // a plan saved by this form → put it back exactly and show it
+    applySnapshot(d);
+    document.getElementById('discountDate').value = d.discountDate || '';
+    renderTreatmentPlan();
+    goStep(3);
+    showPrefillBanner('saved');
+    return;
+  }
+
   // ── Procedures ──────────────────────────────────────────────────────
   (d.procedures || []).forEach(pr => {
     if (!pr || !pr.name) return;
     const match = findTreatment(pr.name);
-    const name  = match ? match.name : String(pr.name);
+    const name  = match ? match.name : safeStr(pr.name);
     const price = (pr.price != null) ? pr.price : (match ? match.price : null);
     if (price == null) { console.warn('Prefill: no price for custom treatment', pr.name, '— skipped'); return; }
 
@@ -2311,7 +2556,7 @@ function applyPrefill(d) {
   // ── Discounts ───────────────────────────────────────────────────────
   (d.discounts || []).forEach(ds => {
     if (!ds || !ds.name) return;
-    document.getElementById('discountName').value = ds.name;
+    document.getElementById('discountName').value = safeStr(ds.name);
     const typeEl = document.getElementById('discountType');
     const pctEl  = document.getElementById('discountPct');
     typeEl.disabled = false;
@@ -2332,7 +2577,7 @@ function applyPrefill(d) {
   showPrefillBanner();
 }
 
-function showPrefillBanner() {
+function showPrefillBanner(kind) {
   if (document.getElementById('prefillBanner')) return;
   const b = document.createElement('div');
   b.id = 'prefillBanner';
@@ -2340,15 +2585,20 @@ function showPrefillBanner() {
   b.style.cssText = 'position:sticky;top:0;z-index:50;background:#0b7a3b;color:#fff;' +
     'padding:10px 16px;font-size:14px;text-align:center;font-weight:600;cursor:pointer;' +
     'box-shadow:0 1px 4px rgba(0,0,0,.2)';
-  b.innerHTML = '🎤 Prefilled from voice — review each step, then “Send to GHL.” ' +
-    '<span style="opacity:.85;font-weight:400">(tap to dismiss)</span>';
+  const hint = '<span style="opacity:.85;font-weight:400">(tap to dismiss)</span>';
+  b.innerHTML = kind === 'saved'
+    ? '📋 Saved plan reopened as it was printed. Tap “← Back” to make changes. ' + hint
+    : '🎤 Prefilled from voice — review each step, then “Send to GHL.” ' + hint;
   b.onclick = () => b.remove();
   document.body.prepend(b);
 }
 
 (function initPrefill() {
   function run() {
-    const raw = new URLSearchParams(location.search).get('plan');
+    // #plan= (saved links: a #fragment never reaches the server) or ?plan= (voice links).
+    // The fragment wins if both are present: it is the link that was opened last.
+    const raw = new URLSearchParams(location.hash.slice(1)).get('plan')
+             || new URLSearchParams(location.search).get('plan');
     if (!raw) return;
     let data;
     try {
@@ -2359,6 +2609,8 @@ function showPrefillBanner() {
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', run);
   else run();
+  // Opening another saved link in the same tab only changes the #fragment; reload to apply it cleanly.
+  window.addEventListener('hashchange', () => { if (/[#&]plan=/.test(location.hash)) location.reload(); });
 })();
 </script>
 </body>
