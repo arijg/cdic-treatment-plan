@@ -43,6 +43,7 @@ and nothing goes through Cloudflare.
 | H | Location | `location` dropdown |
 | I | Plan link | `.../treatment-plan.html#plan=<base64url JSON>`, opens the plan prefilled |
 | J | Plan ID | short hash used for de-duplication (hide this column) |
+| K | Date of birth | `patientDOB`, when entered. The report uses it to recognize the same patient across plans (added 2026-11-10) |
 
 D to F are numbers formatted as currency; format column C as plain text. Easy extras for
 later: doctor, discount valid-through date, ceramic flag.

@@ -8,7 +8,8 @@ Cloudflare or GitHub.
 
 Columns written: Date, Patient, Phone, Case total, Discount, Net total (formula),
 Coordinator, Location, Plan link (reopens the plan in the form), Plan ID (stops the
-same plan being logged twice on one day).
+same plan being logged twice on one day), Date of birth (when it was entered on the form;
+the report uses it to recognize the same patient across plans).
 
 ## One-time setup (about 10 minutes, signed in as ariel@cdic.com)
 

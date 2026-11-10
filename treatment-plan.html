@@ -2156,6 +2156,7 @@ function buildLogRow() {
     planId:      'tp' + cyrb53(json + '|' + localISODate()).toString(36),
     patient:     `${plan.patient.firstName} ${plan.patient.lastName}`.trim(),
     phone:       plan.patient.phone,
+    dob:         plan.patient.dob,   // YYYY-MM-DD or '' (the sheet uses it to recognize the same patient)
     caseTotal:   Math.round(t.caseTotal * 100) / 100,
     discount:    Math.round(t.discountTotal * 100) / 100,
     coordinator: plan.coordinator,

@@ -48,6 +48,7 @@ function doPost(e) {
   const patient = text_(d.patient);
   if (!patient) return json_({ ok: false, error: 'missing patient' });
   const planId = text_(d.planId, 40);
+  const dob = /^\d{4}-\d{2}-\d{2}$/.test(String(d.dob || '')) ? String(d.dob) : '';
   const link = /^https?:\/\/[^\s"<>]+$/.test(String(d.link || '')) && String(d.link).length <= 45000
     ? String(d.link)
     : '';
@@ -73,11 +74,13 @@ function doPost(e) {
       text_(d.location, 60),    // H Location
       link,                     // I Plan link
       planId,                   // J Plan ID
+      dob,                      // K Date of birth (blank if not entered)
     ]);
     const row = sh.getLastRow();
     sh.getRange(row, 6).setFormulaR1C1('=RC[-2]-RC[-1]');
     sh.getRange(row, 1).setNumberFormat('M/d/yyyy h:mm am/pm');
     sh.getRange(row, 4, 1, 3).setNumberFormat('$#,##0.00');
+    sh.getRange(row, 11).setNumberFormat('M/d/yyyy');
     return json_({ ok: true });
   } finally {
     lock.releaseLock();
