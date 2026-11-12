@@ -15,7 +15,8 @@ All fields are optional. Omitted dropdowns fall back to the form's defaults.
     "lastName":  "Smith",
     "phone":     "2125550100",        // any format; the form reformats it
     "email":     "john@example.com",
-    "dob":       "1980-03-03"          // YYYY-MM-DD or MM/DD/YYYY
+    "dob":       "1980-03-03",         // YYYY-MM-DD or MM/DD/YYYY
+    "gender":    "Female"              // Male / Female / Other; only used for Dentrix
   },
   "doctor":      "Dr. Dale Goldschlag", // fuzzy-matched; a last name works
   "coordinator": "Jackie",
