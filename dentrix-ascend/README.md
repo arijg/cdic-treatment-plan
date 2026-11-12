@@ -89,5 +89,9 @@ These codes are stand-ins chosen on 2026-11-12, to be thought through later:
   total. "Copy for Dentrix" now copies the script with the sheet, and the
   instructions have Claude run it; the click-by-click steps stay as a fallback.
 
-Not yet tried: switching offices, and a run by Claude in Chrome from the
-pasted sheet.
+- Claude in Chrome runs (2026-11-12): from the pasted sheet, Claude in Chrome
+  entered 14 lines in 1 minute 30 seconds, switched offices both ways, and
+  created a new patient. On a forced stop (D7210 with no tooth) the script
+  closed its own dialog, Claude reported and waited, and after "skip line 2
+  and continue" the remaining lines went in with the right note and total.
+  The Ledger stayed at $0.00 each time.
