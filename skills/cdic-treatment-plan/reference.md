@@ -106,6 +106,7 @@ to handle this — just be aware the prompt may appear.
 | Courtesy X-Rays | $250 off | No |
 | Senior Citizen Discount | Percentage off whole case | **Yes** |
 | Military Appreciation Discount | Percentage off | **Yes** |
+| Returning Patient Discount | Percentage off | **Yes** |
 | Spring Renewal Special | Percentage off | **Yes** |
 | Shine All Summer | Percentage off | **Yes** |
 | The Fall Confidence Special | Percentage off | **Yes** |
